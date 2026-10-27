@@ -112,6 +112,33 @@ class ProportionalIntegralController(BaseMultiplierController):
         self.integral_error = 0.0
 
 
+class ExponentialMovingAverageController(BaseMultiplierController):
+    """Exponential Moving Average (EMA) multiplier controller for smooth price tracking."""
+
+    def update(
+        self,
+        current_step: int,
+        max_steps: int,
+        total_budget: float,
+        current_average_cost: float,
+    ) -> float:
+        """Updates lambda using exponential moving average of violation signals."""
+        if max_steps <= 0:
+            return self.current_lambda
+
+        nominal_target = total_budget * (current_step / max_steps)
+        violation = current_average_cost - nominal_target
+
+        # Update target signal and apply momentum smoothing
+        target_signal = self.config.initial_lambda + self.config.learning_rate * violation
+        ema = self.config.momentum * self.current_lambda + (1.0 - self.config.momentum) * target_signal
+
+        new_lambda = max(self.config.min_lambda, min(self.config.max_lambda, ema))
+        self.current_lambda = new_lambda
+        self.step_history.append(new_lambda)
+        return self.current_lambda
+
+
 def create_multiplier_controller(config: MultiplierConfig) -> BaseMultiplierController:
     """Factory function for instantiating multiplier controllers."""
     if config.controller_type == MultiplierType.FIXED:
@@ -120,5 +147,7 @@ def create_multiplier_controller(config: MultiplierConfig) -> BaseMultiplierCont
         return ProjectedSubgradientController(config)
     elif config.controller_type == MultiplierType.PROPORTIONAL_INTEGRAL:
         return ProportionalIntegralController(config)
+    elif config.controller_type == MultiplierType.EXPONENTIAL_MOVING_AVERAGE:
+        return ExponentialMovingAverageController(config)
     else:
         return ProjectedSubgradientController(config)

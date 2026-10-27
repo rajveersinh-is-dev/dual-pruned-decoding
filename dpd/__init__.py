@@ -35,6 +35,7 @@ from dpd.instrumentation import HighResolutionProfiler
 from dpd.metrics import EvaluationSummary, compute_evaluation_summary
 from dpd.multipliers import (
     BaseMultiplierController,
+    ExponentialMovingAverageController,
     FixedMultiplierController,
     ProjectedSubgradientController,
     ProportionalIntegralController,
@@ -67,6 +68,7 @@ __all__ = [
     "DecodingTelemetry",
     "DualCertificate",
     "EvaluationSummary",
+    "ExponentialMovingAverageController",
     "FixedMultiplierController",
     "HighResolutionProfiler",
     "HullConfig",
