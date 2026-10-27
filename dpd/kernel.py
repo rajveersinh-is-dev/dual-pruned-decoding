@@ -28,24 +28,33 @@ def get_rust_kernel() -> ctypes.CDLL | None:
 
     _LOAD_ATTEMPTED = True
     pkg_dir = Path(__file__).parent
+    repo_root = pkg_dir.parent
     ext = ".dll" if sys.platform == "win32" else (".dylib" if sys.platform == "darwin" else ".so")
-    dll_path = pkg_dir / f"dpd_kernel{ext}"
 
-    if dll_path.exists():
-        try:
-            lib = ctypes.CDLL(str(dll_path))
-            lib.rust_compute_upper_left_hull.argtypes = [
-                ctypes.POINTER(ctypes.c_double),
-                ctypes.POINTER(ctypes.c_double),
-                ctypes.c_size_t,
-                ctypes.POINTER(ctypes.c_size_t),
-                ctypes.c_size_t,
-                ctypes.POINTER(ctypes.c_size_t),
-            ]
-            lib.rust_compute_upper_left_hull.restype = ctypes.c_int32
-            _LIB = lib
-        except (OSError, AttributeError):
-            _LIB = None
+    candidate_paths = [
+        pkg_dir / f"dpd_kernel{ext}",
+        pkg_dir / f"libdpd_kernel{ext}",
+        repo_root / "dpd_kernel" / "target" / "release" / f"libdpd_kernel{ext}",
+        repo_root / "dpd_kernel" / "target" / "release" / f"dpd_kernel{ext}",
+    ]
+
+    for dll_path in candidate_paths:
+        if dll_path.exists():
+            try:
+                lib = ctypes.CDLL(str(dll_path))
+                lib.rust_compute_upper_left_hull.argtypes = [
+                    ctypes.POINTER(ctypes.c_double),
+                    ctypes.POINTER(ctypes.c_double),
+                    ctypes.c_size_t,
+                    ctypes.POINTER(ctypes.c_size_t),
+                    ctypes.c_size_t,
+                    ctypes.POINTER(ctypes.c_size_t),
+                ]
+                lib.rust_compute_upper_left_hull.restype = ctypes.c_int32
+                _LIB = lib
+                break
+            except (OSError, AttributeError):
+                continue
 
     return _LIB
 
