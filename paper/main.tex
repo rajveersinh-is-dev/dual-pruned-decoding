@@ -120,8 +120,22 @@ S(y^\star) \le S(y^\star) + \lambda (B - C(y^\star)) = \mathcal{L}(y^\star, \lam
 Taking the minimum over $\lambda \in \Lambda$ proves (1). Subtracting $S(y_{\text{inc}})$ proves (2). If $\Delta_\Lambda = 0$, $S(y_{\text{inc}}) = S(y^\star)$, proving (3).
 \end{proof}
 
+\begin{remark}[Discrete Duality Gaps in Non-Convex Pareto Frontiers]
+Unlike continuous convex optimization where strong duality often holds under constraint qualifications, in discrete sequence spaces the duality gap $\Delta = d^\star - S(y^\star)$ can be strictly positive. Specifically, when the optimal feasible sequence lies on an unsupported (interior) Pareto segment, no linear price $\lambda \ge 0$ can isolate it as the unique scalarized maximizer. 
+
+For example, consider three sequences with cost-score pairs $y_1(0, -5.0)$, $y_2(2, -2.0)$, and $y_3(5, 0.0)$ under budget $B=3.0$. Here, $y_2$ is the unique feasible optimum with score $S(y_2) = -2.0$. The Lagrangian dual function is:
+\begin{equation}
+d(\lambda) = 3\lambda + \max\{-5.0, -2.0 - 2\lambda, -5\lambda\}.
+\end{equation}
+Equating $-2 - 2\lambda = -5\lambda$ yields the breakpoint $\lambda^\star = 2/3$. Evaluating $d(2/3) = 3(2/3) + \max\{-5, -10/3, -10/3\} = 2 - 10/3 = -4/3 \approx -1.333$. The resulting duality gap is:
+\begin{equation}
+\Delta = d^\star - S(y^\star) = -\frac{4}{3} - (-2.0) = \frac{2}{3} \approx 0.667 > 0.
+\end{equation}
+Weak duality holds strictly ($-2.0 < -1.333$), and DPD reports this certificate gap honestly to quantify the maximum potential suboptimality without falsely claiming zero gap.
+\end{remark}
+
 \subsection{Formal Proofs and Mechanization in Lean 4}
-To eliminate the risk of subtle mathematical loopholes or hidden assumptions in discrete sequence spaces, all foundational theorems of DPD have been formally mechanized and verified in the Lean~4 interactive theorem prover \citep{moura2021lean}. In \texttt{formal/DPDTheory.lean}, we define discrete prefixes, additive cost and score valuations, feasible completion sets, and the Lagrangian dual objective. We mechanically prove:
+To eliminate the risk of subtle mathematical loopholes or hidden assumptions in discrete sequence spaces, all foundational theorems of DPD have been formally mechanized and verified in the Lean~4 interactive theorem prover \citep{moura2021lean}. In \texttt{formal/DPDTheory.lean}, we define discrete prefixes, additive cost and score valuations over discrete lattices ($\mathbb{Z}$, which generalizes to rationals/reals via scaling), feasible completion sets, and the Lagrangian dual objective. We mechanically prove:
 \begin{itemize}
     \item \textbf{Pointwise Weak Duality (\texttt{weak\_duality}):} Proves $\forall y \in \mathcal{F}_B, \forall \lambda \ge 0, S(y) \le \mathcal{L}(y, \lambda)$.
     \item \textbf{Dual Suboptimality Bound (\texttt{dual\_suboptimality\_bound}):} Proves that the difference between the dual upper bound and incumbent score rigorously bounds the additive suboptimality gap on the search lattice.
@@ -300,11 +314,13 @@ To isolate the contribution of each algorithmic component, we conduct systematic
 
 \paragraph{Beam Width ($K$).} Increasing beam width from $K=2$ to $K=4$ improves average solution score from $-1.89$ to the optimal $-1.84$ with an $80.0\%$ certified optimality rate, while $K=8$ reaches identical score and optimality with higher latency ($112.2\,\mu$s vs. $102.3\,\mu$s), confirming that $K=4$ offers the optimal efficiency-quality trade-off.
 
-\paragraph{Lagrangian Multiplier Update Rules.} We compare the Projected Subgradient controller against a Proportional-Integral (PI) controller ($K_p=0.2, K_i=0.05$) and a Fixed Multiplier ($\lambda=0.8$). The Projected Subgradient rule achieves the lowest execution latency ($96.6\,\mu$s) while matching the full $80.0\%$ feasibility and certification rate.
+\paragraph{Lagrangian Multiplier Update Rules.} We compare the Projected Subgradient controller against a Proportional-Integral (PI) controller ($K_p=0.2, K_i=0.05$), an Exponential Moving Average (EMA) controller ($\beta=0.9$), and a Fixed Multiplier ($\lambda=0.8$). The Projected Subgradient rule achieves the lowest execution latency ($105.5\,\mu$s), while the EMA controller provides smooth momentum-smoothed price signals that match the maximal $80.0\%$ feasibility and certification rate.
 
 \paragraph{Pruning Strategy.} This dimension empirically validates our theoretical analysis of the Convex Hull Pruning Trap (Section~\ref{sec:hull_trap}). The naive \emph{Static Hull Only} strategy drops the feasibility rate from $80.0\%$ down to $73.3\%$ and lowers certified optimality to $73.3\%$, directly exhibiting the failure mode of Counterexample~1 where candidates off the initial hull possess the only feasible completions. In contrast, both \emph{Hybrid Hull-and-Bound} and \emph{Exact Bound \& Dominance} achieve the maximal $80.0\%$ feasibility rate and $80.0\%$ certified optimality rate.
 
-\paragraph{Kernel Implementation.} The Native Rust kernel achieves clean, deterministic parity with the Pure Python reference across all evaluated instances, executing in approximately $104\,\mu$s per full sequence decode on microsecond synthetic graphs.
+\paragraph{Kernel Implementation.} The Native Rust kernel achieves clean, deterministic parity with the Pure Python reference across all evaluated instances, executing in approximately $103.9\,\mu$s per full sequence decode on microsecond synthetic graphs.
+
+\paragraph{Admissible Completion Bounds.} We evaluate the impact of completion bound tightness by comparing the baseline trivial bound $U(u) = 0$ against the newly proposed Budget-Aware Bound ($U(u) = H(u) \cdot \alpha$ with $\alpha = -0.05$). The Budget-Aware Bound conditions future potential directly on remaining resource budget $R(u)$ and per-step token penalties, pruning unpromising branches that cannot reach the incumbent while preserving identical solution quality (score $-1.84$, cost $2.42$, $80.0\%$ feasibility).
 
 \section{Limitations}
 \begin{enumerate}
