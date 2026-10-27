@@ -37,6 +37,7 @@ class HullConfig:
     eps: float = 1e-9  # Numerical tolerance for cross-product and slope comparisons
     retain_collinear: bool = False  # If False, keep only extreme hull vertices
     max_hull_vertices: int | None = None  # Optional cap on retained hull vertices
+    use_rust_kernel: bool = True  # Use high-performance Rust FFI kernel when available
 
 
 @dataclass

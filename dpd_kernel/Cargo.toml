@@ -1,0 +1,13 @@
+[package]
+name = "dpd_kernel"
+version = "0.1.0"
+edition = "2021"
+authors = ["Rajveersinh Pardeshi <rajveersinh.dev@gmail.com>"]
+description = "High-performance native Rust pruning kernel for Dual-Pruned Decoding"
+license = "MIT"
+
+[lib]
+name = "dpd_kernel"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]

@@ -16,3 +16,6 @@ build/
 *.xdv
 *.bbl
 *.blg
+target/
+dpd_kernel/target/
+

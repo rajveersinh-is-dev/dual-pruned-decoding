@@ -120,3 +120,7 @@ class DecodingResult:
     all_feasible_sequences: list[PrefixCandidate] = field(default_factory=list)
     telemetry: DecodingTelemetry = field(default_factory=DecodingTelemetry)
     termination_reason: str = "eos"
+
+
+# Type alias for external API convenience
+DPDOutput = DecodingResult

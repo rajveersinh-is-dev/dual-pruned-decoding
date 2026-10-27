@@ -1,0 +1,27 @@
+\begin{table*}[t]
+\centering
+\small
+\caption{Ablation Study across Beam Widths $K$, Lagrangian Multiplier Controllers, Pruning Mechanisms, and Native Rust Acceleration on Non-Convex Lattices ($N=15$). Cert.\% denotes fraction of certified optimal sequences.}
+\label{tab:ablations}
+\begin{tabular}{llccccc}
+\toprule
+Ablation Dimension & Configuration & Score ($\uparrow$) & Cost & Feasible (\%) ($\uparrow$) & Latency ($\mu$s) & Cert.\% \\
+\midrule
+Beam Width ($K$) & K=2 & -1.89 & 2.27 & 80.0\% & 100.1 & 80.0\% \\
+ & K=4 & -1.84 & 2.42 & 80.0\% & 102.3 & 80.0\% \\
+ & K=8 & -1.84 & 2.42 & 80.0\% & 112.2 & 80.0\% \\
+\midrule
+Multiplier Rule & Projected Subgradient & -1.84 & 2.42 & 80.0\% & 96.6 & 80.0\% \\
+ & Proportional-Integral (PI) & -1.84 & 2.42 & 80.0\% & 100.1 & 80.0\% \\
+ & Fixed Multiplier (lambda=0.8) & -1.84 & 2.42 & 80.0\% & 98.8 & 80.0\% \\
+\midrule
+Pruning Strategy & Hybrid Hull-and-Bound & -1.84 & 2.42 & 80.0\% & 100.9 & 80.0\% \\
+ & Exact Bound \& Dominance & -1.84 & 2.42 & 80.0\% & 101.0 & 80.0\% \\
+ & Static Hull Only & -1.74 & 2.15 & 73.3\% & 90.8 & 73.3\% \\
+ & No Pruning (Standard Beam) & -1.84 & 2.42 & 80.0\% & 100.9 & 80.0\% \\
+\midrule
+Kernel Implementation & Native Rust Kernel & -1.84 & 2.42 & 80.0\% & 104.5 & 80.0\% \\
+ & Pure Python Reference & -1.84 & 2.42 & 80.0\% & 102.0 & 80.0\% \\
+\bottomrule
+\end{tabular}
+\end{table*}

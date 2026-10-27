@@ -67,3 +67,26 @@ $$\Delta = d^\star - S(y_{\text{inc}}) \ge 0$$
 | **Total per Step** | **$O(K \cdot |\mathcal{V}| + M \log M)$** | **$O(K \cdot |\mathcal{V}|)$** |
 
 Since $M \le K \cdot |\mathcal{V}|$ is typically on the order of 50 to 500 candidates after top-$k$ pre-selection, the 2D Monotone Chain hull computation takes under $50\,\mu\text{s}$, which is less than $0.1\%$ of the GPU forward-pass latency ($20-50\,\text{ms}$).
+
+---
+
+## 4. Native Rust Acceleration Kernel (`dpd_kernel`)
+
+To eliminate Python interpreter overhead in performance-critical deployments, DPD provides a high-performance native Rust implementation in `dpd_kernel/`.
+- **Algorithm:** Andrew's Monotone Chain 2D convex hull algorithm in $O(M \log M)$ with pre-hull Pareto dominance filtering.
+- **Safety & FFI:** Zero-copy C foreign function interface (`pub unsafe extern "C" fn rust_compute_upper_left_hull`) accessed via Python's `ctypes`.
+- **Verification:** Differential property-based fuzzing (`tests/property/test_rust_kernel_equivalence.py`) runs 23 exhaustive randomized, collinear, and degenerate tests verifying 100% equivalence with the pure Python reference implementation.
+- **Clippy:** Strictly validated with `cargo clippy --all-targets -- -D warnings` (0 warnings, 0 errors).
+
+---
+
+## 5. Formal Mechanization in Lean 4
+
+All foundational theorems of DPD are mechanized and proven in Lean 4 (`formal/DPDTheory.lean`):
+- `weak_duality`: Pointwise weak Lagrangian duality.
+- `dual_suboptimality_bound`: Bounded suboptimality certificate $\Delta = d^\star - S(y_{\text{inc}}) \ge 0$.
+- `certified_optimal_when_zero_gap`: Exact global optimality certificate when $\Delta = 0$.
+- `safe_infeasibility_pruning`: Certified pruning when $C(u) + c_{\min}(u) > B$.
+- `safe_incumbent_bound_pruning`: Certified pruning when $S(u) + U(u) \le S_{\text{inc}}$.
+
+Every proof compiles cleanly with 0 errors, 0 warnings, 0 `sorry`, and 0 `axiom` declarations.

@@ -146,3 +146,60 @@ print("Dual bound d*:", cert.dual_bound)
 print("Suboptimality gap Delta:", cert.suboptimality_gap)
 print("Is certified optimal:", cert.is_certified_optimal)
 ```
+
+---
+
+## 6. Hugging Face Transformers Integration
+
+DPD integrates seamlessly with standard Hugging Face pipelines through two interfaces:
+
+### A. `DPDLogitsProcessor`
+Drop-in logits processor compatible with `model.generate()`:
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from dpd.cost_models import TokenCountCostModel
+from dpd.hf_integration import DPDLogitsProcessor
+
+model = AutoModelForCausalLM.from_pretrained("distilgpt2")
+tokenizer = AutoTokenizer.from_pretrained("distilgpt2")
+
+logits_processor = DPDLogitsProcessor(
+    budget=15.0,
+    cost_model=TokenCountCostModel(),
+    initial_lambda=0.5,
+    learning_rate=0.1,
+    eos_token_id=tokenizer.eos_token_id,
+)
+
+outputs = model.generate(
+    **tokenizer("Write a summary of quantum mechanics:", return_tensors="pt"),
+    max_new_tokens=30,
+    logits_processor=[logits_processor],
+)
+```
+
+### B. `DPDGenerationWrapper`
+End-to-end wrapper providing full certificate tracking:
+```python
+from dpd.hf_integration import DPDGenerationWrapper
+
+wrapper = DPDGenerationWrapper(model=model, tokenizer=tokenizer)
+result = wrapper.generate(prompt="Explain general relativity:", budget=20.0)
+print("Text:", result.text)
+print("Certified optimal:", result.certificate.is_certified_optimal)
+```
+
+---
+
+## 7. Native Rust Kernel (`dpd_kernel`)
+
+The native Rust acceleration kernel can be configured via `HullConfig`:
+```python
+from dpd.config import DPDConfig, HullConfig
+
+config = DPDConfig(
+    beam_width=4,
+    hull=HullConfig(use_rust_kernel=True),  # Automatically loads dpd_kernel.dll/.so
+)
+```
+If the compiled native library is not found or fails to load, DPD gracefully falls back to the pure Python reference implementation with zero interruption.

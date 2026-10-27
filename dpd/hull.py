@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dpd.config import HullConfig
+from dpd.kernel import compute_upper_left_hull_rust
 from dpd.types import CostScorePoint
 
 
@@ -56,6 +57,13 @@ def compute_upper_left_hull(
 
     cfg = config or HullConfig()
     eps = cfg.eps
+
+    if cfg.use_rust_kernel and not cfg.retain_collinear:
+        rust_hull = compute_upper_left_hull_rust(points)
+        if rust_hull is not None:
+            if cfg.max_hull_vertices is not None and len(rust_hull) > cfg.max_hull_vertices:
+                return rust_hull[:cfg.max_hull_vertices]
+            return rust_hull
 
     # Step 1: Filter vertical and horizontal dominances
     # Group points by unique cost, keeping the one with maximum score.
