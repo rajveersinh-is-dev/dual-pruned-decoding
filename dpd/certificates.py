@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dpd.hull import CostScorePoint, compute_upper_left_hull
 from dpd.types import DualCertificate, PrefixCandidate
 
 
@@ -46,8 +47,25 @@ def compute_dual_certificate(
     incumbent_score = incumbent.accumulated_score if is_feasible and incumbent else -float("inf")
     incumbent_cost = incumbent.accumulated_cost if is_feasible and incumbent else 0.0
 
-    # Multiplier grid search over [0, max_multiplier]
-    multipliers = [i * (max_multiplier / max(1, num_multipliers - 1)) for i in range(num_multipliers)]
+    # Analytical slope breakpoints from upper-left hull
+    candidate_lambdas: set[float] = {0.0}
+    if len(all_terminal_candidates) >= 2:
+        hull_pts = [
+            CostScorePoint(cost=c.accumulated_cost, score=c.accumulated_score, candidate_id=i)
+            for i, c in enumerate(all_terminal_candidates)
+        ]
+        hull_vertices = compute_upper_left_hull(hull_pts)
+        for i in range(len(hull_vertices) - 1):
+            v1, v2 = hull_vertices[i], hull_vertices[i + 1]
+            dc = v2.cost - v1.cost
+            if dc > 1e-9:
+                slope = (v2.score - v1.score) / dc
+                if 0.0 <= slope <= max_multiplier:
+                    candidate_lambdas.add(slope)
+
+    # Multiplier grid search combined with exact hull breakpoints
+    grid_multipliers = [i * (max_multiplier / max(1, num_multipliers - 1)) for i in range(num_multipliers)]
+    multipliers = sorted(candidate_lambdas.union(grid_multipliers))
     dual_values: list[float] = []
 
     for lam in multipliers:

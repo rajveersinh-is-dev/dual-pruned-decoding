@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from dpd.types import DecodingResult
 
@@ -64,7 +65,7 @@ def compute_evaluation_summary(results: list[DecodingResult]) -> EvaluationSumma
     certified_count = 0
     for r in results:
         if r.certificate is not None:
-            if r.certificate.is_feasible and math_isfinite(r.certificate.suboptimality_gap):
+            if r.certificate.is_feasible and math.isfinite(r.certificate.suboptimality_gap):
                 dual_gaps.append(r.certificate.suboptimality_gap)
             if r.certificate.certified_optimal:
                 certified_count += 1
@@ -86,9 +87,3 @@ def compute_evaluation_summary(results: list[DecodingResult]) -> EvaluationSumma
         average_dual_gap=avg_gap,
         certified_optimal_rate=certified_rate,
     )
-
-
-def math_isfinite(val: float) -> bool:
-    """Helper to check if a float is finite."""
-    import math
-    return math.isfinite(val)

@@ -42,11 +42,13 @@ class DPDLogitsProcessor(LogitsProcessor):
         initial_lambda: float = 0.0,
         learning_rate: float = 0.05,
         max_lambda: float = 10.0,
+        max_steps: int = 64,
         eos_token_id: int = 50256,
     ) -> None:
         super().__init__()
         self.budget = float(budget)
         self.cost_model = cost_model
+        self.max_steps = max_steps
         mult_cfg = MultiplierConfig(
             initial_lambda=initial_lambda,
             learning_rate=learning_rate,
@@ -55,14 +57,86 @@ class DPDLogitsProcessor(LogitsProcessor):
         self.controller = ProjectedSubgradientController(mult_cfg)
         self.eos_token_id = eos_token_id
         self.accumulated_costs: dict[int, float] = {}
+        self._step_count: int = 0
+        self._call_count: int = 0
+        self._tokens_recorded_since_last_call: dict[int, bool] = {}
+        self._last_lengths: dict[int, int] = {}
+
+    def record_selected_token(
+        self,
+        batch_idx: int,
+        token_id: int,
+        prefix: list[int] | None = None,
+    ) -> float:
+        """Records the token selected at the current step and updates the multiplier controller.
+
+        When running a custom generation loop, call this method after selecting each token:
+        ```python
+        # In custom decoding loop:
+        scores = logits_processor(input_ids, next_token_logits)
+        next_token = torch.argmax(scores, dim=-1)
+        for b in range(batch_size):
+            logits_processor.record_selected_token(b, int(next_token[b]))
+        ```
+
+        Args:
+            batch_idx: Index of the sequence in the batch.
+            token_id: The vocabulary token ID chosen.
+            prefix: Optional previous token sequence for context-dependent cost models.
+
+        Returns:
+            The updated current_lambda from the multiplier controller.
+        """
+        curr = self.accumulated_costs.get(batch_idx, 0.0)
+        step_c = self.cost_model.step_cost(None, prefix or [], token_id)
+        new_cost = curr + step_c
+        self.accumulated_costs[batch_idx] = new_cost
+        self._step_count += 1
+        self._tokens_recorded_since_last_call[batch_idx] = True
+
+        avg_cost = sum(self.accumulated_costs.values()) / max(1, len(self.accumulated_costs))
+        self.controller.update(
+            current_step=self._step_count,
+            max_steps=self.max_steps,
+            total_budget=self.budget,
+            current_average_cost=avg_cost,
+        )
+        return self.controller.current_lambda
 
     def __call__(
         self,
         input_ids: torch.LongTensor,
         scores: torch.FloatTensor,
     ) -> torch.FloatTensor:
-        """Applies Lagrangian price penalty and masks infeasible next tokens."""
+        """Applies Lagrangian price penalty and masks infeasible next tokens.
+
+        Supports both explicit tracking via `record_selected_token()` and automatic
+        detection of appended tokens across sequential generation steps.
+        """
         batch_size, vocab_size = scores.shape
+        self._call_count += 1
+
+        # Check for newly appended tokens in input_ids if not explicitly recorded
+        for b in range(batch_size):
+            cur_len = input_ids[b].shape[0] if hasattr(input_ids[b], "shape") else len(input_ids[b])
+            prev_len = self._last_lengths.get(b, cur_len)
+            if cur_len > prev_len and not self._tokens_recorded_since_last_call.get(b, False):
+                # A new token was appended to input_ids by generate()
+                newly_added_token = int(input_ids[b][-1].item())
+                prefix = input_ids[b][:-1].tolist()
+                step_c = self.cost_model.step_cost(None, prefix, newly_added_token)
+                self.accumulated_costs[b] = self.accumulated_costs.get(b, 0.0) + step_c
+                self._step_count += 1
+                avg_cost = sum(self.accumulated_costs.values()) / max(1, len(self.accumulated_costs))
+                self.controller.update(
+                    current_step=self._step_count,
+                    max_steps=self.max_steps,
+                    total_budget=self.budget,
+                    current_average_cost=avg_cost,
+                )
+            self._last_lengths[b] = cur_len
+            self._tokens_recorded_since_last_call[b] = False
+
         lam = self.controller.current_lambda
 
         for b in range(batch_size):
@@ -138,7 +212,8 @@ class DPDGenerationWrapper:
                 outputs = self.model(input_tensor)
                 next_token_logits = outputs.logits[0, -1, :]
                 log_probs = torch.log_softmax(next_token_logits, dim=-1)
-                top_log_probs, top_indices = torch.topk(log_probs, k=self.branch_top_k)
+                effective_k = min(self.branch_top_k, log_probs.shape[-1])
+                top_log_probs, top_indices = torch.topk(log_probs, k=effective_k)
 
             return [
                 (int(idx), float(lp), None)

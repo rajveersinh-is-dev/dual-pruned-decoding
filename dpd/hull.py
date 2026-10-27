@@ -76,7 +76,7 @@ def compute_upper_left_hull(
             cost_map[key] = pt
         else:
             existing = cost_map[key]
-            if pt.score > existing.score + eps or abs(pt.score - existing.score) <= eps and pt.candidate_id < existing.candidate_id:
+            if pt.score > existing.score + eps or (abs(pt.score - existing.score) <= eps and pt.candidate_id < existing.candidate_id):
                 cost_map[key] = pt
 
     sorted_candidates = sorted(cost_map.values(), key=lambda p: (p.cost, -p.score))

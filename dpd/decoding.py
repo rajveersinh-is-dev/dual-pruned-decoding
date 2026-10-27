@@ -128,10 +128,10 @@ def dual_pruned_decoding(
         active_expanded = [c for c in expanded_candidates if not c.is_terminal]
         if not active_expanded:
             # Only terminals generated in this step
-            beam = [c for c in expanded_candidates if c.is_terminal]
             step_t1 = HighResolutionProfiler.now_ns()
             telemetry.step_durations_ns.append(step_t1 - step_t0)
-            continue
+            termination_reason = "all_terminal"
+            break
 
         # Step 2: Pruning by Infeasibility
         feasible_lookahead: list[PrefixCandidate] = []

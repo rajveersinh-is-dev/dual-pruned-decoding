@@ -74,35 +74,34 @@ The Lagrangian dual function is:
 $$d(\lambda) = \lambda B + \max_{i \in \{1, 2, 3\}} [S_i - \lambda C_i] = 3\lambda + \max\{-5, -2 - 2\lambda, 0 - 5\lambda\}$$
 
 Let us evaluate $d(\lambda)$ for all $\lambda \ge 0$:
-1. For $\lambda \in [0, 1]$:
-   - At $\lambda = 0$: $\max\{-5, -2, 0\} = 0 \implies d(0) = 0$.
-   - As $\lambda$ increases from 0 to 1, sequence 3 achieves $0 - 5\lambda$ which dominates sequence 2 until $\lambda = 2/3$.
-   - Specifically, for $\lambda = 0.4$:
-     $S_1 - \lambda C_1 = -5.0$
-     $S_2 - \lambda C_2 = -2 - 0.8 = -2.8$
-     $S_3 - \lambda C_3 = 0 - 2.0 = -2.0$ (wins).
-     $d(0.4) = 3(0.4) + (-2.0) = 1.2 - 2.0 = -0.8$.
-2. At $\lambda = 1.0$:
-   - $S_1 - \lambda C_1 = -5$
-   - $S_2 - \lambda C_2 = -4$
-   - $S_3 - \lambda C_3 = -5$
-   - $d(1.0) = 3(1.0) + (-4) = -1.0$.
-3. For $\lambda \ge 1.0$:
-   - At $\lambda = 1.5$: $d(1.5) = 3(1.5) + \max\{-5, -5, -7.5\} = 4.5 - 5.0 = -0.5$.
+1. For $\lambda \in [0, 2/3]$:
+   - Sequence 3 ($0 - 5\lambda$) dominates sequence 2 ($-2 - 2\lambda$).
+   - The breakpoint where sequence 3 and sequence 2 tie is:
+     $$-2 - 2\lambda = -5\lambda \implies 3\lambda = 2 \implies \lambda = \frac{2}{3}$$
+   - On this interval, $d(\lambda) = 3\lambda + (-5\lambda) = -2\lambda$, which is strictly decreasing.
+   - At $\lambda = 0$: $d(0) = 0$.
+   - At $\lambda = 2/3$: $d(2/3) = 3(2/3) + \max\{-5, -10/3, -10/3\} = 2 - 10/3 = -4/3 \approx -1.333$.
+2. For $\lambda \in [2/3, 1.5]$:
+   - Sequence 2 ($-2 - 2\lambda$) dominates both sequence 1 and sequence 3.
+   - On this interval, $d(\lambda) = 3\lambda + (-2 - 2\lambda) = \lambda - 2$, which is strictly increasing.
+   - For example, at $\lambda = 1.0$: $d(1.0) = 3(1.0) + (-4) = -1.0$.
+3. For $\lambda \ge 1.5$:
+   - At $\lambda = 1.5$, sequence 1 ($-5$) ties sequence 2 ($-2 - 2(1.5) = -5$).
+   - For $\lambda > 1.5$, sequence 1 dominates: $d(\lambda) = 3\lambda - 5$.
    - As $\lambda \to \infty$, $d(\lambda) \to \infty$.
 
-The minimum dual upper bound occurs at $\lambda^\star = 1.0$ with value:
-$$d^\star = \min_{\lambda \ge 0} d(\lambda) = -1.0$$
+The minimum dual upper bound occurs at the breakpoint $\lambda^\star = 2/3$ with value:
+$$d^\star = \min_{\lambda \ge 0} d(\lambda) = d\left(\frac{2}{3}\right) = -\frac{4}{3} \approx -1.333$$
 
 ### The Duality Gap
 The true constrained optimum is $S(y^\star) = S(y_2) = -2.0$.  
-The dual upper bound is $d^\star = -1.0$.  
+The dual upper bound is $d^\star = -4/3 \approx -1.333$.  
 The duality gap is:
-$$\Delta = d^\star - S(y^\star) = -1.0 - (-2.0) = 1.0 > 0$$
+$$\Delta = d^\star - S(y^\star) = -\frac{4}{3} - (-2.0) = \frac{2}{3} \approx 0.667 > 0$$
 
 ### Conclusion
-- The duality gap is strictly positive ($\Delta = 1.0$).
-- Weak duality holds: $S(y^\star) = -2.0 \le -1.0 = d^\star$.
+- The duality gap is strictly positive ($\Delta = 2/3 \approx 0.667$).
+- Weak duality holds: $S(y^\star) = -2.0 \le -4/3 = d^\star$.
 - But strong duality does NOT hold. This occurs because the discrete nature of token sequences creates a non-convex Pareto frontier where point $(C_2, S_2) = (2, -2.0)$ lies below the line connecting $(0, -5.0)$ and $(5, 0.0)$.
 - **Scientific Implication:** DPD must report the certificate gap $\Delta$ honestly and never claim that the Lagrangian dual is tight in general.
 
