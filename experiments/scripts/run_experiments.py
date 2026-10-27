@@ -22,6 +22,7 @@ from dpd.baselines import (
     length_penalty_beam_search,
     standard_beam_search,
 )
+from dpd.bounds import BudgetAwareBound, TrivialAdmissibleBound
 from dpd.config import DPDConfig, HullConfig, MultiplierConfig
 from dpd.decoding import dual_pruned_decoding
 from dpd.metrics import EvaluationSummary, compute_evaluation_summary
@@ -308,6 +309,7 @@ def run_ablation_study() -> dict[str, Any]:
     for m_type, m_name in [
         (MultiplierType.PROJECTED_SUBGRADIENT, "Projected Subgradient"),
         (MultiplierType.PROPORTIONAL_INTEGRAL, "Proportional-Integral (PI)"),
+        (MultiplierType.EXPONENTIAL_MOVING_AVERAGE, "Exponential Moving Average (EMA)"),
         (MultiplierType.FIXED, "Fixed Multiplier (lambda=0.8)"),
     ]:
         res_list = []
@@ -372,11 +374,35 @@ def run_ablation_study() -> dict[str, Any]:
             res_list.append(res)
         kernel_results[k_name] = compute_evaluation_summary(res_list)
 
+    # 5. Admissible Completion Bound Ablation
+    bound_results: dict[str, Any] = {}
+    for bound_type, b_name in [
+        ("trivial", "Trivial Bound (U=0)"),
+        ("aware", "Budget-Aware Bound (alpha=-0.05)"),
+    ]:
+        res_list = []
+        for inst in suite:
+            cost_model = LatticeCostModel(inst)
+            def step_fn(p, pref, inst=inst):
+                return inst.transitions.get(tuple(pref), [(inst.eos_token_id, 0.0, "eos")])
+            b_mgr = BudgetAwareBound(cost_model, max_log_prob_per_step=-0.05) if bound_type == "aware" else TrivialAdmissibleBound()
+            cfg = DPDConfig(
+                beam_width=4,
+                max_steps=inst.max_steps,
+                budget=inst.budget,
+                eos_token_id=inst.eos_token_id,
+                pruning_mode=PruningMode.HYBRID_HULL_AND_BOUND,
+            )
+            res = dual_pruned_decoding("synth", cfg, cost_model, step_fn, bound_manager=b_mgr)
+            res_list.append(res)
+        bound_results[b_name] = compute_evaluation_summary(res_list)
+
     return {
         "beam_width": beam_results,
         "multiplier_rules": mult_results,
         "pruning_modes": prune_results,
         "kernel_acceleration": kernel_results,
+        "bound_admissibility": bound_results,
     }
 
 

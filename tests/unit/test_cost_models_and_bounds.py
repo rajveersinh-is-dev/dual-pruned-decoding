@@ -2,12 +2,18 @@
 
 import pytest
 
-from dpd.bounds import BudgetConditionedBound, TrivialAdmissibleBound
+from dpd.bounds import (
+    BudgetAwareBound,
+    BudgetConditionedBound,
+    TrivialAdmissibleBound,
+)
 from dpd.cost_models import (
+    CallableCostModel,
     CharacterCostModel,
     MonetaryCostModel,
     TokenCountCostModel,
 )
+from dpd.dominance import filter_by_incumbent_bound
 from dpd.types import PrefixCandidate
 
 
@@ -58,3 +64,73 @@ def test_budget_conditioned_bound():
     # Remaining budget = 2.0, min step = 1.0 => max 2 tokens. Horizon = min(2, 9) = 2.
     # 2 * (-0.1) = -0.2
     assert ub == pytest.approx(-0.2)
+
+
+def test_budget_aware_bound_tighter_than_trivial():
+    """BudgetAwareBound returns strictly negative upper bounds that dominate TrivialAdmissibleBound."""
+    cm = TokenCountCostModel(eos_token_id=2)
+    b_trivial = TrivialAdmissibleBound()
+    b_aware = BudgetAwareBound(cost_model=cm, max_log_prob_per_step=-0.05)
+
+    cand = PrefixCandidate(token_ids=[1], accumulated_score=-1.5, accumulated_cost=2.0, step=1)
+    ub_trivial = b_trivial.upper_bound_score(cand, max_steps=10, budget=5.0)
+    ub_aware = b_aware.upper_bound_score(cand, max_steps=10, budget=5.0)
+
+    # Remaining budget is 3.0, horizon is min(3, 9) = 3. Upper bound is 3 * (-0.05) = -0.15
+    assert ub_trivial == 0.0
+    assert ub_aware == pytest.approx(-0.15)
+    assert ub_aware < ub_trivial  # Strictly tighter!
+
+    # Terminal candidates have 0.0 remaining bound
+    cand_term = PrefixCandidate(token_ids=[1, 2], accumulated_score=-1.5, accumulated_cost=2.0, step=2, is_terminal=True)
+    assert b_aware.upper_bound_score(cand_term, max_steps=10, budget=5.0) == 0.0
+
+    # Over budget candidate gets -inf
+    cand_over = PrefixCandidate(token_ids=[1], accumulated_score=-1.5, accumulated_cost=6.0, step=1)
+    assert b_aware.upper_bound_score(cand_over, max_steps=10, budget=5.0) == -float("inf")
+
+
+def test_budget_aware_bound_pruning_dominance():
+    """Verifies that BudgetAwareBound prunes candidates that TrivialAdmissibleBound misses."""
+    cm = TokenCountCostModel(eos_token_id=2)
+    b_trivial = TrivialAdmissibleBound()
+    b_aware = BudgetAwareBound(cost_model=cm, max_log_prob_per_step=-0.1)
+
+    # Candidate with S = -2.0, cost = 2.0. Budget = 4.0.
+    # Remaining budget = 2.0 => horizon = 2 tokens.
+    # Under trivial bound: S + U = -2.0 + 0 = -2.0
+    # Under aware bound: S + U = -2.0 + 2*(-0.1) = -2.2
+    cand = PrefixCandidate(token_ids=[1], accumulated_score=-2.0, accumulated_cost=2.0, step=1)
+
+    # Incumbent with S_inc = -2.1
+    survivors_trivial, pruned_trivial = filter_by_incumbent_bound([cand], incumbent_score=-2.1, bound_manager=b_trivial, max_steps=5, budget=4.0)
+    survivors_aware, pruned_aware = filter_by_incumbent_bound([cand], incumbent_score=-2.1, bound_manager=b_aware, max_steps=5, budget=4.0)
+
+    assert len(survivors_trivial) == 1
+    assert pruned_trivial == 0  # Trivial bound failed to prune candidate
+
+    assert len(survivors_aware) == 0
+    assert pruned_aware == 1  # BudgetAware bound successfully pruned candidate!
+
+
+def test_callable_cost_model():
+    """CallableCostModel evaluates arbitrary cost functions and validates non-negativity."""
+    cm = CallableCostModel(cost_fn=lambda prompt, prefix, tok: float(tok * 0.5), min_step=0.5)
+    assert cm.step_cost(None, [], 4) == 2.0
+    assert cm.minimum_step_cost() == 0.5
+
+    # Negative cost should raise ValueError
+    bad_cm = CallableCostModel(cost_fn=lambda prompt, prefix, tok: -1.0)
+    with pytest.raises(ValueError, match="must be non-negative"):
+        bad_cm.step_cost(None, [], 1)
+
+
+def test_character_cost_model_minimum_cost():
+    """CharacterCostModel correctly extracts minimum step cost."""
+    cm_empty = CharacterCostModel(token_to_char_len={}, eos_token_id=0)
+    assert cm_empty.minimum_step_cost() == 1.0
+
+    cm_filled = CharacterCostModel(token_to_char_len={1: 4, 2: 2, 3: 8}, eos_token_id=0)
+    assert cm_filled.minimum_step_cost() == 2.0
+
+

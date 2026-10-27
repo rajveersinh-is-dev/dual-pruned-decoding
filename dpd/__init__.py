@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dpd.bounds import (
     BaseCompletionBound,
+    BudgetAwareBound,
     BudgetConditionedBound,
     TrivialAdmissibleBound,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "BaseCompletionBound",
     "BaseCostModel",
     "BaseMultiplierController",
+    "BudgetAwareBound",
     "BudgetConditionedBound",
     "BudgetConstraintValidator",
     "CallableCostModel",

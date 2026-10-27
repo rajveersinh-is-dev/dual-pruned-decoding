@@ -114,6 +114,7 @@ def generate_tables(results_path: str, tables_dir: str):
             ("multiplier_rules", "Multiplier Rule"),
             ("pruning_modes", "Pruning Strategy"),
             ("kernel_acceleration", "Kernel Implementation"),
+            ("bound_admissibility", "Completion Bound"),
         ]
 
         for cat_key, cat_name in categories:
