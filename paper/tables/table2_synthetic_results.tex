@@ -1,0 +1,17 @@
+\begin{table}[t]
+\centering
+\small
+\caption{Comparison on Synthetic Non-Convex Lattices ($N=15$ instances) with verified ground-truth optimality. Cert.\% indicates fraction of instances with certified global optimality ($\Delta \le 10^{-4}$).}
+\label{tab:synthetic_results}
+\begin{tabular}{lccccc}
+\toprule
+Method & Score ($\uparrow$) & Cost & Feas.\% ($\uparrow$) & Latency (ms) & Cert.\% \\
+\midrule
+DPD (Hybrid) & -1.84 & 2.42 & 80.0\% & 0.12 & 80.0\% \\
+Standard Beam & -2.36 & 4.37 & 73.3\% & 0.10 & 0.0\% \\
+Length Penalty & -2.36 & 4.37 & 73.3\% & 0.10 & 0.0\% \\
+DPD (No Hull) & -1.84 & 2.42 & 80.0\% & 0.12 & 80.0\% \\
+DPD (Fixed Lambda) & -1.84 & 2.42 & 80.0\% & 0.10 & 80.0\% \\
+\bottomrule
+\end{tabular}
+\end{table}

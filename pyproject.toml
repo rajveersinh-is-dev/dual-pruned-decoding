@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
     { name = "Rajveersinh Pardeshi", email = "rajveersinh.dev@gmail.com" }
 ]
-license = { text = "MIT" }
+license = "MIT"
 requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.20.0",
@@ -23,6 +23,10 @@ dev = [
     "ruff>=0.1.0",
     "matplotlib>=3.5.0",
 ]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dpd*"]
 
 [tool.ruff]
 line-length = 100

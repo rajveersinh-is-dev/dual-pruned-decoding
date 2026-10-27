@@ -9,3 +9,10 @@ dist/
 build/
 *.egg-info/
 .venv/
+*.aux
+*.log
+*.out
+*.toc
+*.xdv
+*.bbl
+*.blg

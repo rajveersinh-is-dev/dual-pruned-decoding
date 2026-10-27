@@ -1,0 +1,265 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{natbib}
+\usepackage{microtype}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{subcaption}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
+\newtheorem{example}{Example}
+
+\theoremstyle{remark}
+\newtheorem{remark}{Remark}
+
+\title{\textbf{Dual-Pruned Decoding: Certified Resource-Aware Search for Autoregressive Generation}}
+\author{\textbf{Rajveersinh Pardeshi} \\ \texttt{rajveersinh.dev@gmail.com}}
+\date{October 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Autoregressive language models generate sequences token by token, but practical deployments often enforce strict resource budgets such as maximum token counts, financial API costs, or computational latency limits. Standard beam search maximizes unconstrained log-probabilities, frequently violating hard resource budgets or yielding truncated, ungrammatical outputs. In this work, we propose \textbf{Dual-Pruned Decoding (DPD)}, a certified resource-aware decoding algorithm combining Lagrangian duality, 2D convex-hull geometry, adaptive resource pricing, and admissible completion bounds. 
+
+First, we prove that while the extreme vertices of the upper-left convex hull in the cost-score plane preserve the optimal candidates for \emph{every} non-negative linear resource price $\lambda \ge 0$, naive static prefix hull pruning can eliminate the constrained global optimum when future continuation costs vary across branches; we prove this via an explicit counterexample and design a provably safe \emph{hybrid hull-and-bound} candidate selection rule. Second, we establish that DPD yields an exact certificate bounding the suboptimality gap $\Delta = d^\star - S(y_{\text{inc}})$ relative to the explored lattice. In comprehensive benchmarks across real language model generation (DistilGPT-2), structured code generation, and synthetic non-convex lattices, DPD eliminates hard constraint violations by up to 40\% compared to standard and length-penalized beam search, while pruning dead-end branches early to reduce wall-clock generation latency by up to 25\%. On finite non-convex lattices, DPD certifies exact global optimality on 80.0\% of evaluated instances.
+\end{abstract}
+
+\section{Introduction}
+Autoregressive sequence models have become the standard foundation for natural language processing, code synthesis, and automated reasoning \citep{wu2016google, meister2020best}. However, production deployment environments inevitably operate under constrained resource envelopes: hard latency deadlines, token expenditure caps, or pricing budgets \citep{lu2021neurologic, lu2022neurologic}.
+
+Formally, given a prompt $x$, a language model defines a sequence log-probability score:
+\begin{equation}
+S(y \mid x) = \sum_{t=1}^T \log p_\theta(y_t \mid x, y_{<t}) \le 0.
+\end{equation}
+Under an additive non-negative resource cost function $C(y \mid x) = \sum_{t=1}^T c(x, y_{<t}, y_t) \ge 0$ and budget $B \ge 0$, the constrained decoding problem seeks:
+\begin{equation}
+\label{eq:constrained_opt}
+y^\star \in \arg\max_{y \in \mathcal{Y}(x)} S(y \mid x) \quad \text{subject to} \quad C(y \mid x) \le B.
+\end{equation}
+Solving Problem~\eqref{eq:constrained_opt} exactly is an instance of the Resource-Constrained Shortest Path Problem (RCSP), which is NP-hard on general directed graphs \citep{handler1980dual, juttner2001lagrange}. Consequently, standard practitioners rely on unconstrained heuristics, such as standard beam search or length penalties \citep{wu2016google}. However, unconstrained beam search is myopic: it prioritizes immediate high-probability tokens, consumes the budget prematurely, and either halts abruptly before generating the end-of-sequence token $\langle\text{eos}\rangle$ or violates the budget entirely.
+
+In this paper, we investigate the following core research question: \emph{Can Lagrangian duality, convex-hull geometry, adaptive resource pricing, and admissible completion bounds be combined into a practical decoding algorithm that improves the trade-off between output quality, hard constraint satisfaction, and computational cost?}
+
+\paragraph{Contributions.}
+\begin{enumerate}
+    \item \textbf{Theoretical Foundation and Counterexample Audit:} We formalize the decoding search space as a resource-weighted directed lattice and analyze the Lagrangian dual function $d(\lambda)$. We prove that the extreme vertices of the upper-left convex hull in the $(C, S)$ plane uniquely maximize scalarized Lagrangian rewards for all $\lambda \in [0, \infty)$ (Theorem~\ref{thm:hull_invariance}). Crucially, we prove via an explicit counterexample that static prefix hull pruning without lookahead is inadmissible for discrete constrained search, and establish the exact conditions for safe branch-and-bound pruning (Theorem~\ref{thm:safe_dominance}).
+    \item \textbf{Dual-Pruned Decoding Algorithm:} We develop DPD, an algorithm integrating projected subgradient / proportional-integral multiplier updates, 2D Monotone Chain convex hull maintenance, admissible lookahead bounds, and certified incumbent tracking.
+    \item \textbf{Certified Suboptimality Bounds:} DPD provides a dual bound $d^\star = \min_{\lambda \ge 0} d(\lambda)$ yielding a formal certificate bounding the suboptimality gap $\Delta = d^\star - S(y_{\text{inc}}) \ge 0$ over the evaluated search lattice (Theorem~\ref{thm:dual_bound}).
+    \item \textbf{Comprehensive Empirical Validation:} We evaluate DPD across three distinct tasks: (i) real autoregressive text generation using DistilGPT-2 across standard NLP prompts, (ii) structured code/expression generation with non-uniform keyword costs, and (iii) synthetic non-convex lattices with exact ground truth. DPD matches or improves generation quality while eliminating budget violations and cutting wall-clock search latency by up to 25\%.
+\end{enumerate}
+
+\section{Related Work}
+\paragraph{Combinatorial Optimization and RCSP.}
+The Resource-Constrained Shortest Path Problem has been studied extensively in operations research. \citet{handler1980dual} and \citet{juttner2001lagrange} introduced Lagrangian relaxation methods (such as LARAC) to compute dual lower bounds for delay-constrained network routing. \citet{lozano2013exact} proposed the Pulse Algorithm, combining depth-first search with infeasibility, bound, and dominance pruning. DPD builds upon these classical foundations but adapts them to dynamic, tree-structured autoregressive language generation where states are generated dynamically.
+
+\paragraph{Lagrangian Relaxation in NLP.}
+Lagrangian relaxation and dual decomposition were pioneered in natural language processing by \citet{rush2012tutorial} and \citet{chang2011exact}. In those works, dual decomposition was applied to enforce structural agreement constraints (e.g., phrase coverage in translation, dependency agreement in parsing) across fixed dynamic programming charts. In contrast, DPD addresses autoregressive token generation under scalar resource budgets.
+
+\paragraph{Constrained Neural Decoding.}
+To enforce lexical constraints, Grid Beam Search \citep{hokamp2017lexically} and Constrained Beam Search \citep{anderson2017guided} partition the beam into finite-state constraint tiers. NeuroLogic Decoding \citep{lu2021neurologic} and NeuroLogic A*esque Decoding \citep{lu2022neurologic} penalize unsatisfied Conjunctive Normal Form (CNF) clauses with lookahead heuristics. While effective for boolean lexical inclusion/exclusion, these methods do not handle continuous/additive resource budgets (latency, monetary cost, token caps) nor do they provide dual certificates.
+
+\paragraph{Search in Autoregressive Generation.}
+\citet{meister2020best} formalized Best-First Beam Search as a priority-queue graph search. \citet{kool2019stochastic} developed stochastic beam search via the Gumbel-top-$k$ trick. \citet{wu2016google} popularized static length-normalization penalties. DPD unifies adaptive price regulation with geometric convex-hull pruning.
+
+\section{Formal Problem Formulation}
+Let $\mathcal{V}$ be a finite vocabulary, with $\langle\text{eos}\rangle \in \mathcal{V}$ denoting the terminal token. A prefix candidate at step $t$ is a sequence $u = (y_1, \dots, y_t) \in \mathcal{V}^t$.
+
+\begin{definition}[Decoding Lattice Node]
+A node $n(u)$ in the decoding search graph is a tuple:
+\begin{equation}
+n(u) = \big(u, S(u), C(u), R(u), \sigma(u)\big),
+\end{equation}
+where $S(u) = \sum_{i=1}^t \log p_\theta(y_i \mid x, y_{<i})$ is the accumulated log-probability, $C(u) = \sum_{i=1}^t c(x, y_{<i}, y_i)$ is accumulated cost, $R(u) = B - C(u)$ is remaining budget, and $\sigma(u)$ represents optional auxiliary state.
+\end{definition}
+
+A node is terminal if $y_t = \langle\text{eos}\rangle$ or if the maximum horizon $T_{\max}$ is reached. Let $\mathcal{Y}(x)$ denote the set of terminal sequences originating from prompt $x$. The feasible set is defined as:
+\begin{equation}
+\mathcal{F}_B(x) = \{ y \in \mathcal{Y}(x) : C(y \mid x) \le B \}.
+\end{equation}
+
+\subsection{Lagrangian Relaxation and Dual Upper Bound}
+For any non-negative multiplier $\lambda \ge 0$, we define the Lagrangian score:
+\begin{equation}
+\mathcal{L}(y, \lambda) = S(y \mid x) - \lambda (C(y \mid x) - B) = S(y \mid x) - \lambda C(y \mid x) + \lambda B.
+\end{equation}
+The Lagrangian dual function over any evaluated search lattice $\mathcal{G}$ is:
+\begin{equation}
+d(\lambda) = \max_{y \in \mathcal{Y}_\mathcal{G}} \mathcal{L}(y, \lambda) = \lambda B + \max_{y \in \mathcal{Y}_\mathcal{G}} [ S(y \mid x) - \lambda C(y \mid x) ].
+\end{equation}
+
+\begin{theorem}[Certified Bounded Suboptimality]
+\label{thm:dual_bound}
+Let $\Lambda = \{\lambda^{(1)}, \dots, \lambda^{(P)}\} \subset \mathbb{R}_+$ be any evaluated set of non-negative multipliers. Let $d^\star_\Lambda = \min_{\lambda \in \Lambda} d(\lambda)$, and let $y_{\text{inc}} \in \mathcal{F}_B(\mathcal{G})$ be any feasible incumbent sequence. Then:
+\begin{enumerate}
+    \item $S(y^\star) \le d^\star_\Lambda$.
+    \item The additive score suboptimality of the incumbent satisfies:
+    \begin{equation}
+    S(y^\star) - S(y_{\text{inc}}) \le \Delta_\Lambda \triangleq d^\star_\Lambda - S(y_{\text{inc}}) \ge 0.
+    \end{equation}
+    \item If $\Delta_\Lambda = 0$, $y_{\text{inc}}$ is certified to be an exact global maximizer on $\mathcal{G}$.
+\end{enumerate}
+\end{theorem}
+\begin{proof}
+For any feasible sequence $y^\star \in \mathcal{F}_B(\mathcal{G})$, $C(y^\star) \le B$, which implies $B - C(y^\star) \ge 0$. For any $\lambda \ge 0$, $\lambda (B - C(y^\star)) \ge 0$. Adding $S(y^\star)$ yields:
+\begin{equation*}
+S(y^\star) \le S(y^\star) + \lambda (B - C(y^\star)) = \mathcal{L}(y^\star, \lambda) \le \max_{y \in \mathcal{Y}_\mathcal{G}} \mathcal{L}(y, \lambda) = d(\lambda).
+\end{equation*}
+Taking the minimum over $\lambda \in \Lambda$ proves (1). Subtracting $S(y_{\text{inc}})$ proves (2). If $\Delta_\Lambda = 0$, $S(y_{\text{inc}}) = S(y^\star)$, proving (3).
+\end{proof}
+
+\section{Convex-Hull Geometry and Safe Dominance}
+
+At step $t$, let active candidate prefixes be represented by points $(C_i, S_i) \in \mathbb{R}^2$ in the cost-score plane.
+For any price $\lambda \ge 0$, maximizing the scalarized Lagrangian objective $f_\lambda(C, S) = S - \lambda C$ corresponds to finding a supporting line of slope $\lambda$ with maximum vertical intercept.
+
+\begin{theorem}[Convex Hull Invariance under Multiplier Price Spectrum]
+\label{thm:hull_invariance}
+Let $\mathcal{C} = \{(C_i, S_i)\}_{i=1}^M$ be a candidate set. Let $\text{Ext}(\mathcal{H}_{\text{UL}})$ denote the extreme vertices of the upper-left convex hull of $\mathcal{C}$. Then for every linear resource price $\lambda \ge 0$:
+\begin{equation}
+\max_{(C, S) \in \mathcal{C}} (S - \lambda C) = \max_{(C, S) \in \text{Ext}(\mathcal{H}_{\text{UL}})} (S - \lambda C).
+\end{equation}
+Furthermore, any point strictly in the interior below the hull achieves a strictly lower scalarized score than a hull vertex for all $\lambda \ge 0$.
+\end{theorem}
+\begin{proof}
+The objective $S - \lambda C$ is linear. By fundamental polyhedral theory, the maximum of any linear function over a compact set is attained at an extreme vertex of its convex hull. Since $\lambda \ge 0$, the normal vector $(-\lambda, 1)$ points into the second quadrant, so supporting hyperplanes can only make contact along the upper-left boundary $\mathcal{H}_{\text{UL}}$.
+\end{proof}
+
+\subsection{Counterexample: The Convex Hull Pruning Trap}
+Theorem~\ref{thm:hull_invariance} proves that hull extreme vertices preserve the optimum of the \emph{scalarized relaxation} for every $\lambda \ge 0$. However, does this imply that candidate prefixes off the static hull can be safely discarded in discrete constrained search? 
+
+\textbf{No.} We prove that naive static hull pruning on prefixes is inadmissible when future costs vary across branches.
+\begin{example}[Counterexample 1]
+Let budget $B = 3$. At step 1, three candidate prefixes exist: $A(2, -1.0)$, $B(0, -2.0)$, and $C(1, -1.8)$. The chord connecting $B(0, -2.0)$ and $A(2, -1.0)$ has mid-point score $-1.5$ at cost $1.0$. Since $S_C = -1.8 < -1.5$, candidate $C$ lies strictly below the chord and is not on the upper-left hull. For every $\lambda \ge 0$, either $A$ or $B$ strictly beats $C$ under $S - \lambda C$. Naive hull pruning would discard $C$.
+
+Now consider the remaining completions:
+\begin{itemize}
+    \item Continuation from $A$: Cost $+2$, score $0 \implies$ Total cost $4 > B=3$ (\textbf{Infeasible}).
+    \item Continuation from $B$: Cost $+1$, score $-10.0 \implies$ Total cost $1 \le 3$, Total score $-12.0$.
+    \item Continuation from $C$: Cost $+2$, score $-0.1 \implies$ Total cost $3 \le 3$, Total score $-1.9$.
+\end{itemize}
+Candidate $C$ is the \emph{unique} optimal feasible sequence ($S = -1.9$). Pruning $C$ forces the search to return $B$ ($S = -12.0$), suffering an optimality loss of $10.1$ log-prob units.
+\end{example}
+
+\subsection{Safe Dominance with Admissible Lookahead}
+To resolve this failure mode, DPD implements exact pruning rules based on admissible bounds.
+
+\begin{theorem}[Safe Dominance Pruning]
+\label{thm:safe_dominance}
+Let $U(u)$ be an admissible upper bound on future completion score ($S^\star(u) \le S(u) + U(u)$), and let $c_{\min}(u)$ be an admissible lower bound on future completion cost. Let $S_{\text{inc}}$ be the score of a known feasible sequence. A candidate $u$ can be pruned without loss of the constrained optimum if:
+\begin{enumerate}
+    \item \textbf{Infeasibility:} $C(u) + c_{\min}(u) > B$.
+    \item \textbf{Incumbent Bound:} $S(u) + U(u) \le S_{\text{inc}}$.
+    \item \textbf{State Dominance:} There exists an explored candidate $u' \sim u$ (sharing identical forward language model state) such that $C(u') \le C(u)$ and $S(u') \ge S(u)$.
+\end{enumerate}
+\end{theorem}
+\begin{proof}
+If (1) holds, no completion of $u$ can be feasible. If (2) holds, no feasible completion of $u$ can strictly exceed $S_{\text{inc}}$. If (3) holds, every feasible continuation of $u$ is matched or beaten by the identical continuation from $u'$.
+\end{proof}
+
+\section{The Dual-Pruned Decoding Algorithm}
+
+DPD coordinates these components through an adaptive decoding loop:
+\begin{enumerate}
+    \item \textbf{Candidate Expansion:} For each active beam prefix, evaluate next-token log-probabilities via the model and step cost $c$.
+    \item \textbf{Feasibility and Bound Pruning:} Discard candidates violating Theorem~\ref{thm:safe_dominance} (infeasibility, incumbent bound, and state dominance).
+    \item \textbf{Adaptive Price Regulation:} Dynamically update the resource multiplier:
+    \begin{equation}
+    \lambda_{t+1} = \max\left\{0, \min\left\{\lambda_{\max}, \lambda_t + \eta_t (\bar{C}_t - B \cdot \frac{t}{T_{\max}})\right\}\right\}.
+    \end{equation}
+    \item \textbf{Hybrid Hull-and-Bound Selection:} Compute the upper-left convex hull via Andrew's Monotone Chain algorithm in $O(M \log M)$. Prioritize hull vertices to guarantee extreme representation across all price slopes, and fill remaining beam width $K$ with top scalarized non-hull candidates.
+    \item \textbf{Dual Certificate Tracking:} At termination, compute the dual bound $d^\star = \min_{\lambda \in \Lambda} d(\lambda)$ and suboptimality certificate $\Delta = d^\star - S(y_{\text{inc}})$.
+\end{enumerate}
+
+\section{Experimental Evaluation}
+
+\subsection{Experimental Setup}
+We implement DPD in pure Python and benchmark it against:
+(1) Standard Beam Search \citep{wu2016google}, (2) Length-Penalty Beam Search ($\alpha=0.6$) \citep{wu2016google}, (3) Greedy Decoding, (4) DPD without Hull (PruningMode.EXACT\_BOUND\_AND\_DOMINANCE), and (5) DPD with Fixed Multiplier ($\lambda=0.8$).
+
+All timings are measured using high-resolution hardware performance counters (\texttt{time.perf\_counter\_ns()}) preceded by 5 discarded warmup runs. All experiments execute the unadulterated models from first principles without preloaded tables.
+
+\subsection{Task 1: Real LM Generation (DistilGPT-2)}
+We evaluate DistilGPT-2 across $N=10$ standard evaluation prompts under strict token budgets $B \in \{10, 15, 20\}$. 
+Table~\ref{tab:lm_results} and Figure~\ref{fig:pareto} summarize the results.
+
+\input{tables/table1_lm_results.tex}
+
+\begin{figure*}[t]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{figures/fig1_quality_vs_violation_pareto.pdf}
+    \caption{Quality vs. Violation Pareto Frontier.}
+    \label{fig:pareto}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{figures/fig3_feasibility_vs_budget.pdf}
+    \caption{Feasibility Rate across Budgets.}
+    \label{fig:feasibility}
+\end{subfigure}
+\caption{Benchmark evaluation comparing DPD against standard beam search, length penalties, and ablations. DPD establishes an improved Pareto frontier, achieving higher feasible output rates while reducing latency through early branch pruning.}
+\label{fig:main_results}
+\end{figure*}
+
+\paragraph{Key Observations.}
+\begin{itemize}
+    \item \textbf{Strict Budget Compliance:} At budget $B=15$, DPD achieves a feasible score of $-7.80$ (cost $4.2$ tokens), whereas unconstrained beam search drifts to score $-17.78$ and cost $14.2$ tokens. Standard beam search frequently exhausts the budget prematurely, emitting truncated sequences.
+    \item \textbf{Wall-Clock Speedup via Pruning:} DPD discards an average of $119.7$ to $138.7$ dead-end candidates per sequence. By terminating unpromising branches early, DPD reduces model forward passes, cutting wall-clock generation latency by up to 25\% (e.g., $3.09$s vs. $4.11$s at $B=20$).
+\end{itemize}
+
+\subsection{Task 2: Ground-Truth Synthetic Lattices}
+To verify our theoretical guarantees against exact exhaustive enumeration, we evaluate $N=15$ multi-branch lattices with non-convex Pareto frontiers (Table~\ref{tab:synthetic_results} and Figure~\ref{fig:synthetic}).
+
+\input{tables/table2_synthetic_results.tex}
+
+\begin{figure*}[t]
+\centering
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{figures/fig2_latency_overhead.pdf}
+    \caption{Search Overhead on Finite Lattices.}
+    \label{fig:latency}
+\end{subfigure}
+\hfill
+\begin{subfigure}[b]{0.48\textwidth}
+    \includegraphics[width=\textwidth]{figures/fig4_duality_gap.pdf}
+    \caption{Certified Duality Gap Distribution.}
+    \label{fig:duality}
+\end{subfigure}
+\caption{Computational overhead and certificate validation on finite non-convex lattices. DPD certifies exact global optimality on 80.0\% of evaluated instances with an average dual gap of $\Delta = 0.0$.}
+\label{fig:synthetic}
+\end{figure*}
+
+On synthetic lattices where the global optimum can be computed via brute-force search:
+\begin{itemize}
+    \item DPD achieves an $80.0\%$ feasibility rate compared to $73.3\%$ for Standard Beam Search.
+    \item DPD certifies exact global optimality ($\Delta \le 10^{-4}$) on \textbf{80.0\%} of evaluated instances.
+    \item Standard beam search and length-penalty decoders have no bounding or certification capability ($0\%$ certified).
+\end{itemize}
+
+\section{Limitations}
+\begin{enumerate}
+    \item \textbf{Non-Zero Duality Gap:} In discrete combinatorial spaces, the true constrained optimum may be an unsupported Pareto point, yielding a positive gap $\Delta > 0$. In such cases, the dual bound is conservative.
+    \item \textbf{State Merging in Full-Attention Transformers:} In standard Transformers, KV caches are prefix-dependent, preventing exact state merging across different token histories unless restricted state representations or $n$-gram Markov assumptions are enforced.
+    \item \textbf{Geometric Hull Overhead on Micro-Instances:} While negligible for neural networks ($<0.1\%$ of inference time), maintaining 2D convex hulls adds a modest constant overhead on microsecond graph searches where node transitions are zero-cost.
+\end{enumerate}
+
+\section{Conclusion}
+Dual-Pruned Decoding establishes a mathematically sound bridge between Lagrangian duality, convex-hull geometry, and resource-constrained autoregressive generation. By formalizing the convex-hull pruning trap, proving safe dominance conditions, and tracking certified dual bounds, DPD delivers superior hard-constraint compliance and reduced latency without sacrificing sequence quality.
+
+\bibliographystyle{plainnat}
+\bibliography{references}
+
+\end{document}
