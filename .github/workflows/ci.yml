@@ -41,12 +41,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Tectonic
-        uses: willemvds/setup-tectonic@v1
+        uses: wtfjoke/setup-tectonic@v3
         with:
-          version: "0.15.0"
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Compile LaTeX Paper
         run: |
           cd paper
           tectonic main.tex
           ls -la main.pdf
+
+      - name: Upload Paper Artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dual-pruned-decoding-paper
+          path: paper/main.pdf

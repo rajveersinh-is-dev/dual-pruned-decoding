@@ -84,7 +84,7 @@ def test_property_deterministic_reproducibility():
 def test_property_dual_certificate_bounds_incumbent():
     """Property (Weak Duality): For any feasible solution, d* >= S(y_inc) - 1e-6."""
     for seed in range(200, 220):
-        def step_fn(prompt, prefix):
+        def step_fn(prompt, prefix, seed=seed):
             if len(prefix) >= 5:
                 return [(0, 0.0, "eos")]
             prefix_seed = seed * 100003 + hash(tuple(prefix)) % 1000003
@@ -124,7 +124,7 @@ def test_property_certified_optimal_rate_on_small_exhaustive_lattice():
     cost_model = TokenCountCostModel(eos_token_id=0)
 
     for seed in range(300, 300 + total_instances):
-        def step_fn(prompt, prefix):
+        def step_fn(prompt, prefix, seed=seed):
             if len(prefix) >= 3:
                 return [(0, 0.0, "eos")]
             prefix_seed = seed * 100003 + hash(tuple(prefix)) % 1000003

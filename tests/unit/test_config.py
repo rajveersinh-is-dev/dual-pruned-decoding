@@ -59,3 +59,13 @@ def test_dpd_config_validation_failures():
 
     with pytest.raises(ValueError, match="budget must be non-negative"):
         DPDConfig(budget=-1.0).validate()
+
+
+def test_hull_config_defaults():
+    """HullConfig instantiates with expected default parameters."""
+    cfg = HullConfig()
+    assert cfg.eps == 1e-9
+    assert cfg.retain_collinear is False
+    assert cfg.max_hull_vertices is None
+    assert cfg.use_rust_kernel is True
+
