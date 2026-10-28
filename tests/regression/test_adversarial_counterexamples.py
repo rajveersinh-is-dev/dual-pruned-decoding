@@ -8,7 +8,7 @@ import pytest
 from dpd.config import DPDConfig
 from dpd.cost_models import TokenCountCostModel
 from dpd.decoding import dual_pruned_decoding
-from dpd.types import PruningMode
+from dpd.types import CertificateScope, PrefixCandidate, PruningMode, SuccessorCompleteness
 
 
 class Counterexample1Lattice:
@@ -247,3 +247,185 @@ def test_counterexample_3_inadmissible_bound_discards_optimum():
     assert res_admissible.best_sequence == [1, 11, 0]
     assert res_admissible.best_score == pytest.approx(-1.02)
     assert res_admissible.best_score > res_inadmissible.best_score
+
+
+def test_counterexample_4_top_k_truncation_discards_optimum():
+    """Counterexample 4: Restricting step_fn to top-k (e.g. k=1) discards the true optimum.
+
+    Search space:
+      From root:
+        token 1 (rank 1): log p = -0.1, step cost = 5.0 (exceeds budget B=3.0)
+        token 2 (rank 2): log p = -0.2, step cost = 1.0 (completion: tok 0, EOS, cost 1.0, log p = -0.1 -> total cost 2.0 <= 3.0, score -0.3)
+      When top_k=1 is used, token 2 is omitted entirely.
+      The top-k search fails to find a feasible solution or returns suboptimal fallback,
+      and its certificate MUST have is_global=False and certificate_scope=RESTRICTED_SUBSET.
+    """
+    class TopKLattice:
+        def step_fn_full(self, prompt, prefix):
+            if not prefix:
+                return [(1, -0.1, "tok1"), (2, -0.2, "tok2")]
+            if prefix == [1]:
+                return [(0, 0.0, "eos")]
+            if prefix == [2]:
+                return [(0, -0.1, "eos")]
+            return [(0, 0.0, "eos")]
+
+        def step_fn_top1(self, prompt, prefix):
+            # Only returns top 1 successor by immediate log prob
+            full = self.step_fn_full(prompt, prefix)
+            full.sort(key=lambda x: x[1], reverse=True)
+            return full[:1]
+
+    class CustomCostModel(TokenCountCostModel):
+        def step_cost(self, prompt, prefix, token):
+            if not prefix and token == 1:
+                return 5.0  # token 1 is infeasible under budget 3.0
+            return 1.0
+
+    lattice = TopKLattice()
+    cost_model = CustomCostModel(eos_token_id=0)
+
+    # Top-1 restricted search
+    cfg_top1 = DPDConfig(
+        beam_width=5,
+        max_steps=3,
+        budget=3.0,
+        eos_token_id=0,
+        successor_completeness=SuccessorCompleteness.RESTRICTED_TOP_K,
+    )
+    res_top1 = dual_pruned_decoding("test", cfg_top1, cost_model, lattice.step_fn_top1)
+    assert not res_top1.is_feasible
+    assert res_top1.certificate.is_global is False
+    assert res_top1.certificate.certified_globally_optimal is False
+    assert res_top1.certificate.certificate_scope == CertificateScope.RESTRICTED_SUBSET
+
+    # Full search
+    cfg_full = DPDConfig(
+        beam_width=5,
+        max_steps=3,
+        budget=3.0,
+        eos_token_id=0,
+        successor_completeness=SuccessorCompleteness.EXHAUSTIVE_FINITE_DOMAIN,
+    )
+    res_full = dual_pruned_decoding("test", cfg_full, cost_model, lattice.step_fn_full)
+    assert res_full.is_feasible
+    assert res_full.best_sequence == [2, 0]
+    assert res_full.best_score == pytest.approx(-0.3)
+    assert res_full.certificate.is_global is True
+    assert res_full.certificate.certified_globally_optimal is True
+
+
+def test_counterexample_5_tied_scores_and_multiplier_stability():
+    """Counterexample 5: Multiple candidates with identical cost and score (degeneracy).
+    Verifies that ties in score and cost do not cause division by zero in slope calculations,
+    multiplier oscillation, or non-deterministic crashes.
+    """
+    from dpd.certificates import compute_dual_certificate
+
+    candidates = [
+        PrefixCandidate(step=1, token_ids=[1], accumulated_score=-2.0, accumulated_cost=2.0, is_terminal=True),
+        PrefixCandidate(step=1, token_ids=[2], accumulated_score=-2.0, accumulated_cost=2.0, is_terminal=True),
+        PrefixCandidate(step=1, token_ids=[3], accumulated_score=-2.0, accumulated_cost=2.0, is_terminal=True),
+    ]
+    cert = compute_dual_certificate(
+        all_terminal_candidates=candidates,
+        budget=2.0,
+        incumbent=candidates[0],
+        tolerance=1e-4,
+        is_global=True,
+    )
+    assert cert.is_feasible is True
+    assert cert.dual_upper_bound == pytest.approx(-2.0)
+    assert cert.suboptimality_gap == pytest.approx(0.0)
+    assert cert.certified_globally_optimal is True
+
+
+def test_counterexample_6_empty_feasible_set_all_candidates_infeasible():
+    """Counterexample 6: All candidate completions strictly exceed the resource budget.
+    Asserts graceful infeasibility handling, finite fallback sequence, and certificate marking.
+    """
+    class InfeasibleBranchLattice:
+        def step_fn(self, prompt, prefix):
+            if not prefix:
+                return [(1, -0.5, "b1"), (2, -0.8, "b2")]
+            return [(0, 0.0, "eos")]
+
+    class HighCostModel(TokenCountCostModel):
+        def step_cost(self, prompt, prefix, token):
+            return 10.0
+
+    lattice = InfeasibleBranchLattice()
+    cost_model = HighCostModel(eos_token_id=0)
+    cfg = DPDConfig(beam_width=4, max_steps=3, budget=5.0, eos_token_id=0)
+    res = dual_pruned_decoding("test", cfg, cost_model, lattice.step_fn)
+
+    assert res.is_feasible is False
+    assert res.certificate.is_feasible is False
+    assert res.certificate.suboptimality_gap == float("inf")
+    assert res.certificate.certified_optimal is False
+    assert res.certificate.certified_globally_optimal is False
+
+
+def test_counterexample_7_numerical_tolerance_boundary_shift():
+    """Counterexample 7: Floating-point boundary behavior in incumbent bound filtering.
+    A candidate with score exactly S_inc - 1e-12 should be pruned if strictly <= incumbent_score,
+    while S_inc + 1e-12 must not be pruned.
+    """
+    from dpd.bounds import TrivialAdmissibleBound
+    from dpd.dominance import filter_by_incumbent_bound
+
+    bounds = TrivialAdmissibleBound()
+    incumbent_score = -5.0
+
+    c_strictly_below = PrefixCandidate(
+        step=1, token_ids=[1], accumulated_score=-5.1, accumulated_cost=1.0
+    )
+    c_strictly_above = PrefixCandidate(
+        step=1, token_ids=[2], accumulated_score=-4.9, accumulated_cost=1.0
+    )
+    c_exact_tie = PrefixCandidate(
+        step=1, token_ids=[3], accumulated_score=-5.0, accumulated_cost=1.0
+    )
+    c_boundary_survivor = PrefixCandidate(
+        step=1, token_ids=[4], accumulated_score=-5.0 + 1e-8, accumulated_cost=1.0
+    )
+
+    # Under TrivialAdmissibleBound (bound = 0.0), S(c) + U(c) = S(c).
+    # filter_by_incumbent_bound keeps candidate if S(c) + U(c) > incumbent_score + eps (eps=1e-9).
+    survivors, pruned_count = filter_by_incumbent_bound(
+        [c_strictly_below, c_strictly_above, c_exact_tie, c_boundary_survivor],
+        incumbent_score=incumbent_score,
+        bound_manager=bounds,
+        max_steps=5,
+        budget=10.0,
+    )
+    assert c_strictly_above in survivors
+    assert c_boundary_survivor in survivors
+    assert c_strictly_below not in survivors
+    assert c_exact_tie not in survivors  # Cannot strictly improve upon existing feasible incumbent
+    assert pruned_count == 2
+
+
+def test_counterexample_8_scope_mismatch_prevents_global_certificate():
+    """Counterexample 8: Scope mismatch prevention.
+    A restricted search cannot produce a GLOBAL_EXHAUSTIVE certificate,
+    even if the user or caller passes is_global=True with scope=RESTRICTED_SUBSET.
+    """
+    from dpd.certificates import compute_dual_certificate
+
+    cand = PrefixCandidate(step=1, token_ids=[1, 0], accumulated_score=-1.0, accumulated_cost=1.0, is_terminal=True)
+    
+    # Caller attempts to force is_global=True while declaring scope=RESTRICTED_SUBSET
+    cert = compute_dual_certificate(
+        all_terminal_candidates=[cand],
+        budget=2.0,
+        incumbent=cand,
+        scope=CertificateScope.RESTRICTED_SUBSET,
+        is_global=True,  # Conflicting / misleading argument
+    )
+    # The certificate engine must sanitize this: is_global forced to False
+    assert cert.is_global is False
+    assert cert.certified_globally_optimal is False
+    assert cert.certificate_scope == CertificateScope.RESTRICTED_SUBSET
+    assert cert.certified_optimal is False
+    assert cert.certified_optimal_within_scope is True

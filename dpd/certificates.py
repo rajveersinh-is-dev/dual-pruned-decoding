@@ -13,7 +13,7 @@ def compute_dual_certificate(
     num_multipliers: int = 100,
     max_multiplier: float = 20.0,
     tolerance: float = 1e-4,
-    scope: CertificateScope = CertificateScope.RESTRICTED_SUBSET,
+    scope: CertificateScope | None = None,
     is_global: bool = False,
     open_frontier_upper_bound: float | None = None,
 ) -> DualCertificate:
@@ -48,6 +48,14 @@ def compute_dual_certificate(
     Returns:
         DualCertificate with bounding gap and full scope details.
     """
+    if scope is None:
+        effective_scope = CertificateScope.GLOBAL_EXHAUSTIVE if is_global else CertificateScope.RESTRICTED_SUBSET
+    else:
+        # Prevent silent scope escalation: non-global scope cannot produce a global guarantee
+        if scope != CertificateScope.GLOBAL_EXHAUSTIVE and is_global:
+            is_global = False
+        effective_scope = CertificateScope.GLOBAL_EXHAUSTIVE if is_global else scope
+
     if not all_terminal_candidates:
         return DualCertificate(
             is_feasible=False,
@@ -56,7 +64,7 @@ def compute_dual_certificate(
             dual_upper_bound=float("inf"),
             suboptimality_gap=float("inf"),
             certified_optimal=False,
-            certificate_scope=scope,
+            certificate_scope=effective_scope,
             is_global=is_global,
             certified_globally_optimal=False,
             certified_optimal_within_scope=False,
@@ -115,8 +123,6 @@ def compute_dual_certificate(
         certified_optimal_within_scope = False
         certified_globally_optimal = False
         certified_optimal = False
-
-    effective_scope = CertificateScope.GLOBAL_EXHAUSTIVE if is_global else scope
 
     return DualCertificate(
         is_feasible=is_feasible,

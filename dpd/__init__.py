@@ -52,6 +52,7 @@ from dpd.types import (
     MultiplierType,
     PrefixCandidate,
     PruningMode,
+    SuccessorCompleteness,
 )
 
 __version__ = "0.1.0"
@@ -84,6 +85,7 @@ __all__ = [
     "ProportionalIntegralController",
     "PruningMode",
     "RecoveryManager",
+    "SuccessorCompleteness",
     "TokenCountCostModel",
     "TrivialAdmissibleBound",
     "compute_dual_certificate",

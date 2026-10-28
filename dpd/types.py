@@ -76,6 +76,28 @@ class PrefixCandidate:
         )
 
 
+class SuccessorCompleteness(str, Enum):
+    """Declared completeness guarantee for the transition function step_fn.
+
+    Attributes:
+        EXHAUSTIVE_FINITE_DOMAIN: The transition function generates all legal successors
+            in the full discrete optimization domain. Global optimality certificates can be
+            established if the branch-and-bound search is exhaustive and unpruned.
+        RESTRICTED_LATTICE: The transition function generates all legal successors within
+            a formally restricted decoding sub-lattice. Optimality certificates are scoped
+            to this lattice, strictly disallowing global optimality claims.
+        RESTRICTED_TOP_K: The transition function generates only a top-k shortlist of successors
+            (e.g., top-8 tokens from language model logits). Search is restricted to a heuristic
+            sub-lattice; global optimality certificates are strictly disallowed.
+        RESTRICTED_HEURISTIC: The transition function applies heuristic filtering, sampling,
+            or thresholding. Global optimality certificates are strictly disallowed.
+    """
+    EXHAUSTIVE_FINITE_DOMAIN = "exhaustive_finite_domain"
+    RESTRICTED_LATTICE = "restricted_lattice"
+    RESTRICTED_TOP_K = "restricted_top_k"
+    RESTRICTED_HEURISTIC = "restricted_heuristic"
+
+
 class CertificateScope(str, Enum):
     """Scope of mathematical validity for a dual certificate."""
     RESTRICTED_SUBSET = "restricted_subset"  # Valid only over the evaluated terminal candidate set

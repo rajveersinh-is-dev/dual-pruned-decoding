@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 from dpd.bounds import BaseCompletionBound, TrivialAdmissibleBound
 from dpd.certificates import compute_dual_certificate
@@ -21,12 +22,13 @@ from dpd.types import (
     DecodingTelemetry,
     PrefixCandidate,
     PruningMode,
+    SuccessorCompleteness,
 )
 
 # Step function signature: (prompt, prefix_token_ids) -> List[Tuple[token_id, log_prob, optional_state_id]]
 StepFunction = Callable[
     [Any, list[int]],
-    list[tuple[int, float, Optional[str]]],
+    list[tuple[int, float, str | None]],
 ]
 
 
@@ -84,7 +86,10 @@ def dual_pruned_decoding(
             incumbent = root
 
     termination_reason = "max_steps"
-    was_search_exhaustive = bool(getattr(bounds, "is_admissible", True))
+    was_search_exhaustive = (
+        bool(getattr(bounds, "is_admissible", True))
+        and config.successor_completeness == SuccessorCompleteness.EXHAUSTIVE_FINITE_DOMAIN
+    )
 
     for step in range(1, config.max_steps + 1):
         step_t0 = HighResolutionProfiler.now_ns()
@@ -288,12 +293,22 @@ def dual_pruned_decoding(
         is_feasible = False
         termination_reason = "infeasible_fallback"
 
+    cert_scope = (
+        CertificateScope.GLOBAL_EXHAUSTIVE
+        if was_search_exhaustive
+        else (
+            CertificateScope.RESTRICTED_LATTICE
+            if config.successor_completeness == SuccessorCompleteness.RESTRICTED_LATTICE
+            else CertificateScope.RESTRICTED_SUBSET
+        )
+    )
+
     certificate = compute_dual_certificate(
         all_terminal_candidates=all_terminal_candidates,
         budget=config.budget,
         incumbent=best_cand if is_feasible else None,
         tolerance=config.optimality_tolerance,
-        scope=CertificateScope.GLOBAL_EXHAUSTIVE if was_search_exhaustive else CertificateScope.RESTRICTED_SUBSET,
+        scope=cert_scope,
         is_global=was_search_exhaustive,
     )
 

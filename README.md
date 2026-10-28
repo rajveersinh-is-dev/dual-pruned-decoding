@@ -72,27 +72,33 @@ All results are produced directly from our unadulterated benchmark suite (zero p
 
 | Method | Feasible Rate (%) | Mean Score | Mean Cost | Latency ($\mu\text{s}$) | Certified Opt (%) | Mean Gap ($\Delta$) |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **DPD (Ours)** | **80.0%** | **-1.84** | **2.42** | **100.9** | **80.0%** | **0.000** |
-| DPD (Fixed $\lambda$) | 80.0% | -1.84 | 2.42 | 98.8 | 80.0% | 0.000 |
-| Length-Penalty Beam | 73.3% | -2.36 | 4.37 | 98.0 | 0.0% | N/A |
-| Standard Beam Search | 73.3% | -2.36 | 4.37 | 99.5 | 0.0% | N/A |
+| **DPD (Hybrid)** | **80.0%** | **-1.84** | **2.42** | **237.6** | **80.0%** | **0.000** |
+| DPD (No Hull) | 80.0% | -1.84 | 2.42 | 106.5 | 80.0% | 0.000 |
+| DPD (Fixed $\lambda$) | 80.0% | -1.84 | 2.42 | 100.4 | 80.0% | 0.000 |
+| Length-Penalty Beam | 73.3% | -2.36 | 4.37 | 90.0 | 0.0% | N/A |
+| Standard Beam Search | 73.3% | -2.36 | 4.37 | 83.3 | 0.0% | N/A |
+
+> **Evaluation Regime Distinction:** On synthetic toy graphs where transitions take nanoseconds, 2D convex hull maintenance adds a constant $\sim 150\,\mu\text{s}$ CPU overhead. DPD is slower on zero-cost transitions ($237.6\,\mu\text{s}$ vs $83.3\,\mu\text{s}$), where its contribution is strictly mathematical (higher feasibility and dual optimality certificates). Conversely, on real neural language models (DistilGPT-2 above) where forward passes take tens of milliseconds, DPD's candidate pruning cuts wall-clock search latency by **25%** ($3.09\text{s}$ vs $4.11\text{s}$).
 
 ### Systematic Ablation Study ($N=15$ non-convex instances)
 
 | Ablation Dimension | Configuration | Score ($\uparrow$) | Cost | Feasible (%) ($\uparrow$) | Latency ($\mu\text{s}$) | Certified Opt (%) |
 |---|---|:---:|:---:|:---:|:---:|:---:|
-| **Beam Width ($K$)** | $K=2$ | -1.89 | 2.27 | 80.0% | 100.1 | 80.0% |
-| | $K=4$ | -1.84 | 2.42 | 80.0% | 102.3 | 80.0% |
-| | $K=8$ | -1.84 | 2.42 | 80.0% | 112.2 | 80.0% |
-| **Multiplier Controller** | Projected Subgradient | -1.84 | 2.42 | 80.0% | 96.6 | 80.0% |
-| | Proportional-Integral (PI) | -1.84 | 2.42 | 80.0% | 100.1 | 80.0% |
-| | Fixed Multiplier ($\lambda=0.8$) | -1.84 | 2.42 | 80.0% | 98.8 | 80.0% |
-| **Pruning Strategy** | **Hybrid Hull-and-Bound** | **-1.84** | **2.42** | **80.0%** | **100.9** | **80.0%** |
-| | Exact Bound & Dominance | -1.84 | 2.42 | 80.0% | 101.0 | 80.0% |
-| | Static Hull Only (Trap!) | -1.74 | 2.15 | 73.3% | 90.8 | 73.3% |
-| | No Pruning (Standard Beam) | -1.84 | 2.42 | 80.0% | 100.9 | 80.0% |
-| **Kernel Implementation**| Native Rust Kernel | -1.84 | 2.42 | 80.0% | 104.5 | 80.0% |
-| | Pure Python Reference | -1.84 | 2.42 | 80.0% | 102.0 | 80.0% |
+| **Beam Width ($K$)** | $K=2$ | -1.89 | 2.27 | 80.0% | 220.9 | 20.0% |
+| | $K=4$ | -1.84 | 2.42 | 80.0% | 123.8 | 40.0% |
+| | $K=8$ | -1.84 | 2.42 | 80.0% | 201.5 | 73.3% |
+| **Multiplier Controller** | Projected Subgradient | -1.84 | 2.42 | 80.0% | 167.4 | 40.0% |
+| | Proportional-Integral (PI) | -1.84 | 2.42 | 80.0% | 130.0 | 40.0% |
+| | Exponential Moving Average (EMA) | -1.84 | 2.42 | 80.0% | 120.8 | 40.0% |
+| | Fixed Multiplier ($\lambda=0.8$) | -1.84 | 2.42 | 80.0% | 131.5 | 40.0% |
+| **Pruning Strategy** | **Hybrid Hull-and-Bound** | **-1.84** | **2.42** | **80.0%** | **112.1** | **40.0%** |
+| | Exact Bound & Dominance | -1.84 | 2.42 | 80.0% | 101.3 | 40.0% |
+| | Static Hull Only (Trap!) | -1.74 | 2.15 | 73.3% | 83.9 | 0.0% |
+| | No Pruning (Standard Beam) | -1.84 | 2.42 | 80.0% | 98.7 | 40.0% |
+| **Kernel Implementation**| Native Rust Kernel | -1.84 | 2.42 | 80.0% | 102.9 | 40.0% |
+| | Pure Python Reference | -1.84 | 2.42 | 80.0% | 101.6 | 40.0% |
+| **Completion Bound** | Admissible Zero Bound ($U=0$) | -1.84 | 2.42 | 80.0% | 112.4 | 40.0% |
+| | Heuristic Budget Bound ($\alpha=-0.05$) | -1.84 | 2.42 | 80.0% | 106.9 | 0.0% |
 
 ---
 
@@ -191,7 +197,7 @@ If you use Dual-Pruned Decoding in your research, please cite our paper:
 @article{pardeshi2026dual,
   title={Dual-Pruned Decoding: Certified Resource-Aware Search for Autoregressive Generation},
   author={Pardeshi, Rajveersinh},
-  journal={arXiv preprint arXiv:2610.xxxxx},
+  journal={Working Paper},
   year={2026}
 }
 ```

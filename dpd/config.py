@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from dpd.types import MultiplierType, PruningMode
+from dpd.types import MultiplierType, PruningMode, SuccessorCompleteness
 
 
 @dataclass
@@ -54,6 +54,7 @@ class DPDConfig:
     allow_empty: bool = False
     lookahead_steps: int = 0  # Number of lookahead steps for bound evaluation
     optimality_tolerance: float = 1e-4  # Epsilon for dual certificate exactness
+    successor_completeness: SuccessorCompleteness = SuccessorCompleteness.RESTRICTED_TOP_K
 
     def validate(self) -> None:
         """Validates the configuration parameters."""

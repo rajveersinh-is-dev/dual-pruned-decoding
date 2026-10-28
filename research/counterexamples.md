@@ -164,3 +164,111 @@ When implementing the 2D convex hull algorithm, the following edge cases must be
 2. **Horizontal Points (Identical Score):** Multiple candidates with identical score $S_i = S_j$ but different costs $C_i < C_j$. The upper-left hull must discard $j$ and retain only the minimum cost candidate $i$.
 3. **Coincident Points:** Multiple candidates with identical $(C, S)$. Retain exactly one canonical representative.
 4. **Collinear Vertices:** Three points lying on the exact same line with slope $\lambda$. Standard Graham/Andrew algorithms must choose whether to retain collinear boundary points or only extreme vertices. For DPD, extreme vertices suffice to represent the support.
+
+---
+
+## 5. Counterexample 4: Top-$k$ Successor Shortlists Truncate the Feasible Optimum
+
+This counterexample proves that **restricting the transition function `step_fn` to a top-$k$ shortlist (e.g. top-8 tokens by language model logit) invalidates global optimality guarantees, and can discard the unique feasible optimum even when beam width $W$ is arbitrarily large.**
+
+### Construction
+Consider budget $B = 3.0$ and vocabulary $\mathcal{V} = \{1, 2, 0\}$ where $0 = \text{EOS}$.
+From prompt root $\epsilon$:
+- Successor $1$ (rank 1 by immediate logit): $\log p_1 = -0.10$, step cost $c_1 = 5.0$.
+  - Any completion of $1$ has total cost $C \ge 5.0 > B = 3.0$. **Every completion is INFEASIBLE.**
+- Successor $2$ (rank 2 by immediate logit): $\log p_2 = -0.20$, step cost $c_2 = 1.0$.
+  - Continuation: token $0$ (EOS) with $\log p = -0.10$, cost $c = 1.0$.
+  - Complete sequence $y^* = (2, 0)$ has total cost $C(y^*) = 1.0 + 1.0 = 2.0 \le 3.0$ (FEASIBLE) and total score $S(y^*) = -0.30$.
+
+### Impact of Top-$k$ Truncation ($k = 1$)
+If `step_fn` only generates top-$k$ ($k=1$) successors:
+1. Successor $1$ is generated; successor $2$ is never generated.
+2. Search expands successor $1$, encounters infeasibility, and has no feasible candidates in the beam.
+3. The search must either fail or fall back to an infeasible candidate, completely missing the true global optimum $y^*$.
+
+### Scientific Conclusion & Enforcement
+A search over a top-$k$ successor generator is an optimization over a restricted heuristic sub-lattice $\mathcal{L}_{\text{top-}k} \subset \mathcal{V}^*$.  
+**Implementation Rule:** When `config.successor_completeness != SuccessorCompleteness.EXHAUSTIVE_FINITE_DOMAIN`, the certificate engine strictly disallows global certificates, forcing `certificate_scope = CertificateScope.RESTRICTED_SUBSET` (or `RESTRICTED_LATTICE`) and `is_global = False`.
+
+---
+
+## 6. Counterexample 5: Multi-Candidate Degeneracy and Tied Scores
+
+This counterexample examines the behavior of DPD when multiple distinct candidates achieve identical costs and scores, $(C_1, S_1) = (C_2, S_2) = (C_3, S_3)$.
+
+### Potential Failure Mode
+When two points $v_1, v_2$ have identical cost $C_1 = C_2$, computing analytical slopes:
+$$\lambda = \frac{S_2 - S_1}{C_2 - C_1} = \frac{0}{0}$$
+produces a `ZeroDivisionError` or `NaN`. Furthermore, under subgradient multiplier updates, identical scalarized values can cause oscillation or non-deterministic ordering between steps.
+
+### Resolution & Verification
+1. Andrew's Monotone Chain 2D convex hull algorithm sorts lexicographically by $(C, -S)$ and deduplicates points with identical $(C, S)$ within numerical tolerance $\epsilon = 10^{-9}$.
+2. In `dpd/certificates.py`, slope computation enforces `dc = v2.cost - v1.cost > 1e-9`, bypassing vertical degenerate segments.
+3. Regression test `test_counterexample_5_tied_scores_and_multiplier_stability` verifies that the certificate calculates the exact dual upper bound without NaN or crash.
+
+---
+
+## 7. Counterexample 6: Empty Feasible Set / Total Budget Infeasibility
+
+This counterexample proves that **when the resource budget $B$ is set strictly below the minimum possible sequence cost in the search space, DPD must cleanly report infeasibility rather than fabricating an invalid certificate.**
+
+### Construction
+Let budget $B = 5.0$.  
+Suppose every non-trivial sequence has minimum cost $C_{\min} = 10.0 > B$.  
+The feasible candidate set $\mathcal{Y}_{\text{feas}} = \{y \in \mathcal{Y} \mid C(y) \le B\} = \emptyset$.
+
+### Protocol & Enforcement
+1. `incumbent` remains `None`.
+2. When the beam is exhausted, `recovery_mgr.get_best_fallback` returns the least-violating candidate.
+3. The decoding result returns `is_feasible = False` and `termination_reason = "infeasible_fallback"`.
+4. `compute_dual_certificate` sets:
+   - `is_feasible = False`
+   - `suboptimality_gap = inf`
+   - `certified_optimal = False`
+   - `certified_globally_optimal = False`
+   - `certified_optimal_within_scope = False`
+5. Verified by `test_counterexample_6_empty_feasible_set_all_candidates_infeasible`.
+
+---
+
+## 8. Counterexample 7: Floating-Point Boundary Shift in Bound Pruning
+
+This counterexample tests numerical boundary behavior in `filter_by_incumbent_bound`.
+
+### Problem Statement
+Given an incumbent with score $S_{\text{inc}} = -5.0$, a candidate prefix $u$ has completion upper bound $S(u) + U(u)$.  
+Under finite-precision floating-point arithmetic:
+- If a candidate cannot strictly beat the incumbent, exploring it cannot discover a new strictly optimal sequence.
+- If $S(u) + U(u) \le S_{\text{inc}} + \epsilon$, pruning must discard candidates that cannot strictly improve upon the incumbent.
+- If $S(u) + U(u) > S_{\text{inc}} + \epsilon$, pruning must preserve the candidate.
+
+### Verification
+In `test_counterexample_7_numerical_tolerance_boundary_shift`:
+- Candidate $c_1$ with score $-5.1$ is pruned.
+- Candidate $c_2$ with score $-5.0$ (exact tie) cannot strictly improve upon the existing feasible incumbent and is pruned.
+- Candidate $c_3$ with score $-5.0 + 10^{-8} > -5.0 + 10^{-9}$ survives.
+- Candidate $c_4$ with score $-4.9$ survives.
+
+---
+
+## 9. Counterexample 8: Certificate Scope Escalation Prevention
+
+This counterexample proves that **a restricted or heuristic decoding run cannot silently masquerade as a global proof of optimality.**
+
+### Attack Scenario
+A caller executes decoding on a restricted sub-lattice (e.g. `successor_completeness = RESTRICTED_TOP_K`), but manually calls `compute_dual_certificate(..., scope=CertificateScope.RESTRICTED_SUBSET, is_global=True)`.
+
+### Defense & Verification
+In `dpd/certificates.py`:
+```python
+if scope != CertificateScope.GLOBAL_EXHAUSTIVE and is_global:
+    is_global = False
+```
+The certificate sanitizer intercepts the conflicting parameters, strips `is_global`, and sets:
+- `is_global = False`
+- `certified_globally_optimal = False`
+- `certified_optimal = False`
+- `certificate_scope = CertificateScope.RESTRICTED_SUBSET`
+- `certified_optimal_within_scope = True` (if gap within subset $\le \text{tol}$)
+Verified by `test_counterexample_8_scope_mismatch_prevents_global_certificate`.
+

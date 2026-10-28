@@ -8,7 +8,7 @@ from dpd.config import DPDConfig
 from dpd.cost_models import TokenCountCostModel
 from dpd.decoding import dual_pruned_decoding
 from dpd.hull import compute_upper_left_hull, get_hull_slopes
-from dpd.types import CostScorePoint, PruningMode
+from dpd.types import CostScorePoint, PruningMode, SuccessorCompleteness
 
 
 def test_property_hull_strictly_decreasing_slopes():
@@ -141,6 +141,7 @@ def test_property_certified_optimal_rate_on_small_exhaustive_lattice():
             budget=2.0,
             eos_token_id=0,
             pruning_mode=PruningMode.HYBRID_HULL_AND_BOUND,
+            successor_completeness=SuccessorCompleteness.EXHAUSTIVE_FINITE_DOMAIN,
         )
         res = dual_pruned_decoding("test", cfg, cost_model, step_fn)
         true_opt, _ = exact_exhaustive_search("test", cfg, cost_model, step_fn)
