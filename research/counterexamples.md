@@ -107,12 +107,53 @@ $$\Delta = d^\star - S(y^\star) = -\frac{4}{3} - (-2.0) = \frac{2}{3} \approx 0.
 
 ---
 
-## 3. Counterexample 3: Admissible vs Inadmissible Lookahead
+## 3. Counterexample 3: Inadmissibility of Negative Per-Step Log-Probability Bounds
 
-Let true optimal future completion score be $S^*(\tau)$.
-- **Admissible Bound:** An upper bound $U(u) \ge S^*(\tau)$ (e.g. $U(u) = 0$ since all log-probs $\le 0$). Pruning by $S(u) + U(u) \le S_{\text{inc}}$ is safe.
-- **Inadmissible Heuristic:** If a draft model or heuristic predicts $H(u) = \hat{S}$, and $\hat{S} < S^*(\tau)$ (underestimation of future score), then a prefix with high future potential will be falsely discarded.
-- **Empirical Tightness Dilemma:** The bound $U(u) = 0$ is globally admissible, but for long horizons $T$, $S(u) + 0 \le S_{\text{inc}}$ rarely triggers early in generation because $S_{\text{inc}}$ is negative and $S(u)$ is closer to 0. Tighter bounds that condition on remaining budget (e.g., maximum log-prob of tokens with cost $\le R(u)$) are required for effective early pruning.
+This counterexample proves that **configuring a negative per-step log-probability upper bound $\alpha < 0$ in completion bounds (such as `BudgetAwareBound`) is mathematically inadmissible in general autoregressive generation and leads to pruning the globally optimal completion.**
+
+### Construction
+Consider a budget $B = 3.0$ under a uniform step cost model where every emitted token incurs cost $c(y_t) = 1.0$, including EOS (token 0).
+Suppose a search algorithm uses `BudgetAwareBound` with assumed step upper bound $\alpha = -0.05$.
+At step $t = 1$, two candidate branches are expanded from the prompt root:
+1. **Branch $v$ (Immediate Terminal Candidate):** Emits token 0 (EOS) with $\log p = -1.05$.
+   - Cost: $C(v) = 1.0 \le B$.
+   - Score: $S(v) = -1.05$.
+   - Because $v$ is terminal and feasible, it immediately establishes an incumbent solution with $S_{\text{inc}} = -1.05$.
+2. **Branch $u$ (Active Prefix to Optimal Completion):** Emits token 1 with $\log p = -1.00$.
+   - Cost: $C(u) = 1.0$.
+   - Score: $S(u) = -1.00$.
+   - Remaining budget: $R(u) = B - C(u) = 3.0 - 1.0 = 2.0$.
+   - Maximum allowed remaining tokens: $H(u) = \lfloor 2.0 / 1.0 \rfloor = 2$.
+
+### Bound Evaluation at Step 1
+Under the assumed per-step parameter $\alpha = -0.05$:
+$$U_\alpha(u) = H(u) \times \alpha = 2 \times (-0.05) = -0.10$$
+The algorithm computes the upper bound on any completion of $u$:
+$$\bar{S}(u) = S(u) + U_\alpha(u) = -1.00 + (-0.10) = -1.10$$
+Testing against the current incumbent $S_{\text{inc}} = -1.05$:
+$$\bar{S}(u) = -1.10 \le -1.05 = S_{\text{inc}}$$
+The condition $\bar{S}(u) \le S_{\text{inc}}$ is satisfied. **Candidate prefix $u$ is pruned at step 1!**
+
+### True Continuation of Candidate $u$
+Suppose candidate $u$ continues with high-confidence tokens from the language model:
+- Step 2: Emits token 11 with cost $1.0$ and log-probability $\log p(y_2 \mid y_1) = -0.01$ (transition probability $p \approx 0.99 > e^{-0.05} \approx 0.9512$).
+- Step 3: Emits token 0 (EOS) with cost $1.0$ and log-probability $\log p(y_3 \mid y_{\le 2}) = -0.01$.
+The total sequence $y^* = (1, 11, 0)$ has:
+- Total Cost: $C(y^*) = 1.0 + 1.0 + 1.0 = 3.0 \le B = 3.0$ (FEASIBLE).
+- Total Score: $S(y^*) = -1.00 - 0.01 - 0.01 = -1.02$.
+
+### Mathematical Violation
+Observe that:
+$$S(y^*) = -1.02 > -1.05 = S(v) = S_{\text{inc}}$$
+Sequence $y^*$ is the unique constrained global optimum.
+However, because $\alpha = -0.05 < \log p_2 = -0.01$, the bound underestimated the true future potential:
+$$\bar{S}(u) = -1.10 < -1.02 = S(y^*)$$
+The bound was **strictly less than the true completion score**, violating the definition of an admissible upper bound:
+$$\exists \tau \in \text{Completions}(u) \quad \text{s.t.} \quad S(u \circ \tau) > S(u) + U_\alpha(u)$$
+
+### Scientific Conclusion & Enforcement
+1. **Uncertified Heuristic vs. Admissible Bound:** In general causal language models with normalized categorical outputs, $\log p_\theta(y_t \mid y_{<t}) \in (-\infty, 0]$. Since confidence can approach 1.0 arbitrarily closely ($p \to 1.0 \implies \log p \to 0.0$), the **unique universally admissible per-step upper bound is $\alpha = 0.0$** (yielding $U(u) = 0.0$).
+2. **Implementation Rule:** In `dpd/bounds.py`, `max_log_prob_per_step` must strictly default to `0.0`. Any negative value must require an explicit opt-in (`allow_heuristic_tighter_bound=True`) and be marked as an uncertified heuristic search feature.
 
 ---
 

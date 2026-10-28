@@ -15,6 +15,7 @@ from dpd.instrumentation import HighResolutionProfiler
 from dpd.multipliers import create_multiplier_controller
 from dpd.recovery import RecoveryManager
 from dpd.types import (
+    CertificateScope,
     CostScorePoint,
     DecodingResult,
     DecodingTelemetry,
@@ -83,6 +84,7 @@ def dual_pruned_decoding(
             incumbent = root
 
     termination_reason = "max_steps"
+    was_search_exhaustive = bool(getattr(bounds, "is_admissible", True))
 
     for step in range(1, config.max_steps + 1):
         step_t0 = HighResolutionProfiler.now_ns()
@@ -128,6 +130,7 @@ def dual_pruned_decoding(
         active_expanded = [c for c in expanded_candidates if not c.is_terminal]
         if not active_expanded:
             # Only terminals generated in this step
+            beam = []
             step_t1 = HighResolutionProfiler.now_ns()
             telemetry.step_durations_ns.append(step_t1 - step_t0)
             termination_reason = "all_terminal"
@@ -168,8 +171,16 @@ def dual_pruned_decoding(
                 active_expanded, incumbent, config.beam_width
             )
             if should_terminate or not recovered:
-                termination_reason = "infeasibility_pruned"
+                beam = []
+                step_t1 = HighResolutionProfiler.now_ns()
+                telemetry.step_durations_ns.append(step_t1 - step_t0)
+                if incumbent is not None and getattr(bounds, "is_admissible", True):
+                    termination_reason = "all_pruned_by_bound"
+                else:
+                    was_search_exhaustive = False
+                    termination_reason = "infeasibility_pruned"
                 break
+            was_search_exhaustive = False
             dom_survivors = recovered
 
         # Step 5: Multiplier Update
@@ -195,10 +206,13 @@ def dual_pruned_decoding(
         telemetry.step_candidates_pruned_hull.append(hull_pruned_count)
 
         if config.pruning_mode == PruningMode.HULL_EXTREMES_ONLY:
+            if hull_pruned_count > 0:
+                was_search_exhaustive = False
             # Retain only hull vertices
             selected_candidates = [dom_survivors[idx] for idx in hull_indices]
             # If hull vertices exceed beam width, rank by Lagrangian scalarization S - lambda * C
             if len(selected_candidates) > config.beam_width:
+                was_search_exhaustive = False
                 selected_candidates.sort(
                     key=lambda c: c.accumulated_score - current_lambda * c.accumulated_cost,
                     reverse=True,
@@ -206,6 +220,8 @@ def dual_pruned_decoding(
                 selected_candidates = selected_candidates[: config.beam_width]
 
         elif config.pruning_mode == PruningMode.HYBRID_HULL_AND_BOUND:
+            if len(dom_survivors) > config.beam_width:
+                was_search_exhaustive = False
             # Prioritize hull vertices, then fill remaining slots with highest scalarized non-hull candidates
             hull_candidates = [dom_survivors[idx] for idx in hull_indices]
             hull_candidates.sort(
@@ -227,6 +243,8 @@ def dual_pruned_decoding(
                 selected_candidates.extend(non_hull_candidates[:remaining_slots])
 
         elif config.pruning_mode == PruningMode.EXACT_BOUND_AND_DOMINANCE:
+            if len(dom_survivors) > config.beam_width:
+                was_search_exhaustive = False
             # Rank strictly by scalarized score without geometric hull filtering
             dom_survivors.sort(
                 key=lambda c: c.accumulated_score - current_lambda * c.accumulated_cost,
@@ -235,6 +253,8 @@ def dual_pruned_decoding(
             selected_candidates = dom_survivors[: config.beam_width]
 
         else:  # NO_PRUNING / plain ranking
+            if len(dom_survivors) > config.beam_width:
+                was_search_exhaustive = False
             dom_survivors.sort(key=lambda c: c.accumulated_score, reverse=True)
             selected_candidates = dom_survivors[: config.beam_width]
 
@@ -244,6 +264,10 @@ def dual_pruned_decoding(
 
     t_end = HighResolutionProfiler.now_ns()
     telemetry.total_wall_clock_time_sec = (t_end - t_start) * 1e-9
+
+    # If decoding ended with active non-terminal prefixes in beam, search was truncated
+    if any(not c.is_terminal for c in beam):
+        was_search_exhaustive = False
 
     # Determine final output and compute certificate
     all_feasible = [
@@ -269,6 +293,8 @@ def dual_pruned_decoding(
         budget=config.budget,
         incumbent=best_cand if is_feasible else None,
         tolerance=config.optimality_tolerance,
+        scope=CertificateScope.GLOBAL_EXHAUSTIVE if was_search_exhaustive else CertificateScope.RESTRICTED_SUBSET,
+        is_global=was_search_exhaustive,
     )
 
     return DecodingResult(

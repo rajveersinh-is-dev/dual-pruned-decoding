@@ -103,11 +103,13 @@ All mathematical proofs presented above are formalized and mechanically checked 
 
 | Formal Lean 4 Theorem | Paper Theorem Reference | Proven Property | Axioms / Sorry |
 |---|---|---|---|
-| `weak_duality` | Theorem 1 (Pointwise Duality) | $\forall y \in \mathcal{F}_B, \forall \lambda \ge 0, S(y) \le \mathcal{L}(y, \lambda)$ | Zero `sorry`, Zero `axiom` |
+| `pointwise_weak_duality` | Theorem 1 (Pointwise Duality) | $\forall y \in \mathcal{F}_B, \forall \lambda \ge 0, S(y) \le \mathcal{L}(y, \lambda)$ | Zero `sorry`, Zero `axiom` |
 | `dual_suboptimality_bound` | Theorem 1 (Suboptimality Gap) | $S(y^\star) - S(y_{\text{inc}}) \le d^\star - S(y_{\text{inc}})$ | Zero `sorry`, Zero `axiom` |
-| `certified_optimal_when_zero_gap` | Theorem 1 (Zero Gap Exactness) | $\Delta = 0 \implies S(y_{\text{inc}}) = S(y^\star)$ | Zero `sorry`, Zero `axiom` |
+| `certified_optimality_zero_gap` | Theorem 1 (Non-circular Zero Gap) | $\Delta = 0 \implies \forall c \in \mathcal{F}_B, c.\text{score} \le \text{inc}.\text{score}$ | Zero `sorry`, Zero `axiom` |
+| `certified_optimality_matches_opt` | Theorem 1 (Optimality Corollary) | $\Delta = 0 \land \text{opt exists} \implies \text{inc}.\text{score} = \text{opt}.\text{score}$ | Zero `sorry`, Zero `axiom` |
 | `safe_infeasibility_pruning` | Theorem 3 (Condition 1) | $C(u) + c_{\min}(u) > B \implies \forall y \in \mathcal{Y}(u), y \notin \mathcal{F}_B$ | Zero `sorry`, Zero `axiom` |
-| `safe_incumbent_bound_pruning` | Theorem 3 (Condition 2) | $S(u) + U(u) \le S_{\text{inc}} \implies \forall y \in \mathcal{Y}(u), S(y) \le S_{\text{inc}}$ | Zero `sorry`, Zero `axiom` |
+| `safe_bound_pruning` | Theorem 3 (Condition 2) | $S(u) + U(u) \le S_{\text{inc}} \implies \forall y \in \mathcal{Y}(u), S(y) \le S_{\text{inc}}$ | Zero `sorry`, Zero `axiom` |
+| `state_matched_dominance_invariant` | Theorem 3 (Condition 3) | Same state $\land C_1 \le C_2 \land S_1 \ge S_2 \implies u_2$ dominated | Zero `sorry`, Zero `axiom` |
 
 To verify the proofs directly via Lean:
 ```bash
@@ -117,3 +119,18 @@ Or run the automated integration test:
 ```bash
 pytest tests/theory/test_lean_proofs.py
 ```
+
+---
+
+## 6. Comprehensive Audit of Every Pruning Operation
+
+| Pruning Operation | Exact or Heuristic | Underlying Assumptions | Mathematical Justification | Behavior when Assumptions Fail | Validating Tests & Counterexamples |
+|---|:---:|---|---|---|---|
+| **Infeasibility Pruning** | **Exact** | $c_{\min}(u)$ is a sound lower bound on future cost to completion. | If $C(u) + c_{\min}(u) > B$, then for any completion $y \in \mathcal{Y}(u)$, $C(y) \ge C(u) + c_{\min}(u) > B$. No completion can be feasible. | If $c_{\min}$ overestimates future cost, feasible solutions may be pruned prematurely. | `tests/unit/test_dominance.py`<br>`tests/theory/test_lean_proofs.py` |
+| **Incumbent-Bound Pruning** | **Exact** (under admissible $U(u)$) | $U(u)$ is an admissible upper bound on future score ($\forall y \in \mathcal{Y}(u), S(y) \le S(u) + U(u)$). | If $S(u) + U(u) \le S_{\text{inc}}$, then $S(y) \le S(u) + U(u) \le S_{\text{inc}}$. No completion can beat the known feasible incumbent. | If $U(u) < \max \Delta S$ (inadmissible bound, e.g. $\alpha = -0.05$), the true constrained global optimum can be discarded! | **Counterexample 3** (`research/counterexamples.md`)<br>`tests/regression/test_adversarial_counterexamples.py` |
+| **State-Matched Pareto Dominance** | **Exact** | Prefixes $u_1, u_2$ share the identical Markov state $\sigma(u_1) = \sigma(u_2)$, and cost is additive/Markovian. | Future transition distributions and costs are identical for $u_1$ and $u_2$. If $C(u_1) \le C(u_2)$ and $S(u_1) \ge S(u_2)$, every completion of $u_1$ weakly dominates the corresponding completion of $u_2$. | If states are not truly identical (e.g. differing Transformer KV attention histories), valid completions may be lost. In DPD, full causal history is preserved unless state is identical. | `tests/unit/test_dominance.py`<br>`tests/property/test_properties.py` |
+| **Convex Hull Filtering** | **Heuristic** (over full lattice) | All continuation paths from prefix candidates share identical future cost-score trade-offs. | Extreme vertices of the upper-left convex hull maximize $S - \lambda C$ for all linear prices $\lambda \ge 0$ on the *current prefix set*. | When future costs vary across branches, a candidate inside the prefix hull can lead to the unique feasible optimum (**Counterexample 1**). DPD uses **Hybrid Hull-and-Bound** to preserve non-hull candidates. | **Counterexample 1** (`research/counterexamples.md`)<br>`tests/unit/test_hull.py` |
+| **Beam Truncation** | **Heuristic** | Highest scalarized scores $S - \lambda C$ correlate with global optimum membership. | Standard beam search approximation with Lagrangian ranking. | Discards unexplored branches without proof. Search is classified as non-exhaustive (`CertificateScope.RESTRICTED_SUBSET`), and global optimality is NOT certified. | `tests/theory/test_enumerable_lattice.py` |
+| **Recovery / Fallback** | **Heuristic** | Minimizing budget violation $\max(0, C - B)$ yields the least-violating completion. | Graceful degradation when no feasible complete sequence exists. | Output is explicitly flagged as `is_feasible = False` with termination reason `infeasible_fallback`. | `tests/unit/test_metrics.py` |
+| **Multiplier Update** | **Search Heuristic** | Subgradient error signal guides search towards the budget boundary. | Dual subgradient / PI pace regulation. | Multiplier sequence may not be monotonic on non-convex frontiers (**Counterexample 2**). Multipliers are treated as heuristic guidance, not exact optimality proof. | **Counterexample 2** (`research/counterexamples.md`)<br>`tests/unit/test_multipliers.py` |
+

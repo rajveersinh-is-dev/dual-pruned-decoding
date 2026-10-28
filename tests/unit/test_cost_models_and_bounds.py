@@ -52,7 +52,7 @@ def test_trivial_admissible_bound():
 def test_budget_conditioned_bound():
     """Budget conditioned bound returns -inf if budget already exceeded."""
     cm = TokenCountCostModel(eos_token_id=2)
-    b = BudgetConditionedBound(cost_model=cm, max_log_prob_upper_bound=-0.1)
+    b = BudgetConditionedBound(cost_model=cm, max_log_prob_upper_bound=-0.1, allow_heuristic_tighter_bound=True)
 
     cand_over = PrefixCandidate(token_ids=[1], accumulated_score=-1.0, accumulated_cost=10.0, step=1)
     # Budget is 5.0, so cost 10.0 is over budget
@@ -66,11 +66,26 @@ def test_budget_conditioned_bound():
     assert ub == pytest.approx(-0.2)
 
 
+def test_budget_aware_bound_admissible_default():
+    """BudgetAwareBound defaults to 0.0 per step ensuring universal admissibility."""
+    cm = TokenCountCostModel(eos_token_id=2)
+    b_default = BudgetAwareBound(cost_model=cm)
+    assert b_default.max_log_prob_per_step == 0.0
+    assert b_default.is_admissible is True
+
+    cand = PrefixCandidate(token_ids=[1], accumulated_score=-1.5, accumulated_cost=2.0, step=1)
+    assert b_default.upper_bound_score(cand, max_steps=10, budget=5.0) == 0.0
+
+    # Negative value without explicit opt-in raises ValueError
+    with pytest.raises(ValueError, match="is inadmissible for general language model decoding"):
+        BudgetAwareBound(cost_model=cm, max_log_prob_per_step=-0.05)
+
+
 def test_budget_aware_bound_tighter_than_trivial():
-    """BudgetAwareBound returns strictly negative upper bounds that dominate TrivialAdmissibleBound."""
+    """BudgetAwareBound with explicit heuristic opt-in provides tighter bounds than trivial."""
     cm = TokenCountCostModel(eos_token_id=2)
     b_trivial = TrivialAdmissibleBound()
-    b_aware = BudgetAwareBound(cost_model=cm, max_log_prob_per_step=-0.05)
+    b_aware = BudgetAwareBound(cost_model=cm, max_log_prob_per_step=-0.05, allow_heuristic_tighter_bound=True)
 
     cand = PrefixCandidate(token_ids=[1], accumulated_score=-1.5, accumulated_cost=2.0, step=1)
     ub_trivial = b_trivial.upper_bound_score(cand, max_steps=10, budget=5.0)
@@ -91,10 +106,10 @@ def test_budget_aware_bound_tighter_than_trivial():
 
 
 def test_budget_aware_bound_pruning_dominance():
-    """Verifies that BudgetAwareBound prunes candidates that TrivialAdmissibleBound misses."""
+    """Verifies that heuristic BudgetAwareBound prunes candidates that TrivialAdmissibleBound misses."""
     cm = TokenCountCostModel(eos_token_id=2)
     b_trivial = TrivialAdmissibleBound()
-    b_aware = BudgetAwareBound(cost_model=cm, max_log_prob_per_step=-0.1)
+    b_aware = BudgetAwareBound(cost_model=cm, max_log_prob_per_step=-0.1, allow_heuristic_tighter_bound=True)
 
     # Candidate with S = -2.0, cost = 2.0. Budget = 4.0.
     # Remaining budget = 2.0 => horizon = 2 tokens.

@@ -64,3 +64,18 @@ jobs:
         with:
           name: dual-pruned-decoding-paper
           path: paper/main.pdf
+
+  formal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Elan & Lean 4
+        run: |
+          curl https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh -sSf | sh -s -- -y --default-toolchain leanprover/lean4:v4.35.0
+          echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+      - name: Verify Lean 4 Formal Proofs
+        run: |
+          lean --version
+          lean formal/DPDTheory.lean

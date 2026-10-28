@@ -174,3 +174,38 @@ def test_standard_beam_search_violates_budget_when_unconstrained():
     # DPD must satisfy the hard budget
     assert dpd_res.best_cost <= tight_budget + 1e-9
     assert dpd_res.is_feasible
+
+
+def test_beam_truncation_disallows_global_certification():
+    """When beam width truncates active candidate branches, the certificate must report
+    is_global=False and refuse to claim certified_globally_optimal=True."""
+    from dpd.types import CertificateScope
+
+    lattice = DeterministicToyLattice()
+    cost_model = TokenCountCostModel(
+        eos_token_id=lattice.eos_token_id,
+        zero_cost_tokens={lattice.eos_token_id},
+    )
+
+    # Beam width 1 forces aggressive branch truncation on this 3-way branching lattice
+    config = DPDConfig(
+        beam_width=1,
+        max_steps=5,
+        budget=3.0,
+        eos_token_id=lattice.eos_token_id,
+    )
+
+    dpd_res = dual_pruned_decoding(
+        prompt="toy",
+        config=config,
+        cost_model=cost_model,
+        step_fn=lattice.step_fn,
+    )
+
+    assert dpd_res.certificate is not None
+    # Because beam width 1 truncated active branches without branch-and-bound bounding:
+    assert dpd_res.certificate.is_global is False
+    assert dpd_res.certificate.certified_globally_optimal is False
+    assert dpd_res.certificate.certified_optimal is False
+    assert dpd_res.certificate.certificate_scope == CertificateScope.RESTRICTED_SUBSET
+

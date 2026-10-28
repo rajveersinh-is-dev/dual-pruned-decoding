@@ -3,9 +3,8 @@
 [![CI](https://github.com/rajveersinh-is-dev/dual-pruned-decoding/actions/workflows/ci.yml/badge.svg)](https://github.com/rajveersinh-is-dev/dual-pruned-decoding/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![arXiv](https://img.shields.io/badge/arXiv-2610.xxxxx-b31b1b.svg)](paper/main.pdf)
 
-**Dual-Pruned Decoding (DPD)** is a certified, resource-aware search algorithm for autoregressive language model generation under hard resource constraints (token quotas, financial API limits, or latency deadlines). DPD bridges Lagrangian duality, 2D convex-hull geometry, adaptive resource pricing, and admissible completion bounds into a practical decoding procedure that guarantees certified suboptimality certificates while accelerating generation latency by up to 25%.
+**Dual-Pruned Decoding (DPD)** is a resource-aware search algorithm for autoregressive sequence generation under budget constraints (token quotas, financial API limits, or latency deadlines). DPD bridges Lagrangian duality, 2D convex-hull geometry, adaptive resource pricing, and admissible completion bounds into a decoding procedure that computes suboptimality certificates while pruning provably sub-optimal branches.
 
 ---
 
@@ -13,7 +12,7 @@
 
 ![Quality vs Violation Pareto Frontier](paper/figures/fig1_quality_vs_violation_pareto.png)
 
-*Figure 1: Generation quality (sequence log-probability) versus hard constraint violation rate across token budgets $B \in \{10, 15, 20\}$ on DistilGPT-2 ($N=10$ prompts). DPD establishes a superior non-dominated Pareto frontier, achieving 0% constraint violations at $B=15$ and $B=20$ while standard beam search suffers severe budget overrun.*
+*Figure 1: Generation quality (sequence log-probability) versus hard constraint violation rate across token budgets $B \in \{10, 15, 20\}$ on DistilGPT-2 ($N=10$ pilot prompts) and structured code generation. DPD achieves improved feasible generation quality and reduced resource overruns compared to standard and length-penalized beam search.*
 
 ---
 
@@ -30,14 +29,14 @@ $$\max_{y \in \mathcal{Y}(x)} S(y \mid x) \quad \text{subject to} \quad C(y \mid
 
 ---
 
-## 2. Key Contributions & Guarantees
+## 2. Key Contributions & Theoretical Guarantees
 
-1. **Theoretical Foundation & The Convex-Hull Pruning Trap:** We prove that extreme vertices of the upper-left convex hull in the $(C, S)$ plane preserve the optimal candidate for *every* linear price $\lambda \ge 0$ (Theorem 2). However, we mathematically prove via Counterexample 1 that naive static prefix hull pruning is inadmissible when future costs vary across branches. We resolve this by designing a provably safe **Hybrid Hull-and-Bound** candidate selection rule.
-2. **Formal Mechanization in Lean 4:** All foundational theorems (Weak Duality, Dual Suboptimality Gap, Zero Gap Exactness, Safe Infeasibility Pruning, and Safe Incumbent Bound Pruning) are formally proven in Lean 4 (`formal/DPDTheory.lean`) with zero `sorry` placeholders and zero unproven axioms.
-3. **Certified Suboptimality Bounds:** DPD calculates the Lagrangian dual function $d(\lambda)$ and provides a formal certificate bounding the suboptimality gap $\Delta = d^\star - S(y_{\text{inc}}) \ge 0$ relative to the explored search lattice (Theorem 1).
-4. **Adaptive Price Regulation:** Dynamically regulates resource expenditure via projected subgradient / proportional-integral (PI) multiplier updates.
+1. **Theoretical Foundation & The Convex-Hull Pruning Trap:** Extreme vertices of the upper-left convex hull in the $(C, S)$ plane preserve the optimal candidate for *every* linear price $\lambda \ge 0$ (Theorem 2). However, as proven via Counterexample 1, naive static prefix hull pruning can discard the global constrained optimum when future continuation costs vary across branches. DPD addresses this via a **Hybrid Hull-and-Bound** candidate selection rule.
+2. **Formal Mechanization in Lean 4:** Foundational mathematical theorems (Lagrangian Weak Duality, Dual Suboptimality Gap, Non-circular Zero Gap Exactness, Safe Infeasibility Pruning, Safe Incumbent Bound Pruning, and State-Matched Dominance) are formally mechanized in Lean 4 (`formal/DPDTheory.lean`) over discrete arithmetic (`Int`) with zero admitted declarations. Note: Lean proves idealized discrete mathematical properties and does not formally verify the floating-point Python implementation.
+3. **Certified Suboptimality Bounds:** DPD calculates the Lagrangian dual function $d(\lambda)$ and provides a formal certificate bounding the suboptimality gap $\Delta = d^\star - S(y_{\text{inc}}) \ge 0$ relative to the explored search lattice or branch-and-bound tree.
+4. **Adaptive Price Regulation:** Regulates resource expenditure via projected subgradient / proportional-integral (PI) multiplier updates.
 5. **Native Rust Acceleration Kernel (`dpd_kernel`):** Andrew's Monotone Chain 2D convex hull algorithm and Pareto dominance filtering are implemented in Rust (`dpd_kernel/`), verified via differential fuzzing (100% parity across thousands of randomized instances), and exposed via zero-overhead C FFI.
-6. **Latency Acceleration:** Early pruning of provably dead-end candidate branches reduces model forward passes, cutting wall-clock generation latency by up to 25%.
+6. **Latency Acceleration:** Early pruning of provably dead-end candidate branches reduces model forward passes, cutting search latency by up to 25% on constrained workloads.
 7. **Hugging Face Integration:** Drop-in `DPDLogitsProcessor` for standard `model.generate()` pipelines and `DPDGenerationWrapper`.
 
 ---
@@ -46,23 +45,28 @@ $$\max_{y \in \mathcal{Y}(x)} S(y \mid x) \quad \text{subject to} \quad C(y \mid
 
 All results are produced directly from our unadulterated benchmark suite (zero precomputed constants, in-process hardware performance counters, and 5 warmup runs):
 
-### DistilGPT-2 Autoregressive Text Generation ($N=10$ prompts)
+### DistilGPT-2 Autoregressive Text Generation ($N=10$ pilot prompts)
 
-| Budget | Method | Feasible Rate (%) | Feasible Score | Mean Cost | Latency (s) | Pruned / Seq | Certified Opt (%) |
+| Budget | Method | Feasible Rate (%) | Mean Score | Mean Cost | Latency (s) | Pruned / Seq | Certified Opt (%) |
 |---|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| **$B=10$** | **DPD (Ours)** | **40.0%** | **-7.58** | **4.2** | **3.01** | **138.7** | **40.0%** |
-| $B=10$ | DPD (No Hull) | 30.0% | -8.10 | 4.0 | 3.02 | 141.2 | 30.0% |
-| $B=10$ | Length-Penalty Beam | 20.0% | -10.51 | 9.7 | 3.65 | 0.0 | 0.0% |
-| $B=10$ | Standard Beam Search | 20.0% | -10.51 | 9.7 | 3.65 | 0.0 | 0.0% |
-| $B=10$ | Greedy Search | 10.0% | -11.96 | 9.9 | 0.28 | 0.0 | 0.0% |
+| **$B=10$** | **DPD (Ours)** | **30.0%** | **-3.10** | **1.3** | **2.26** | **138.7** | **30.0%** |
+| $B=10$ | DPD (No Hull) | 30.0% | -3.10 | 1.3 | 2.30 | 138.7 | 30.0% |
+| $B=10$ | DPD (Fixed $\lambda$) | 30.0% | -3.10 | 1.3 | 2.35 | 138.7 | 30.0% |
+| $B=10$ | Standard Beam Search | 30.0% | -16.41 | 11.7 | 2.68 | 0.0 | 0.0% |
+| $B=10$ | Length-Penalty Beam | 30.0% | -16.41 | 11.7 | 2.76 | 0.0 | 0.0% |
+| $B=10$ | Greedy Search | 20.0% | -20.67 | 13.3 | 0.69 | 0.0 | 0.0% |
 | **$B=15$** | **DPD (Ours)** | **50.0%** | **-7.80** | **4.2** | **3.18** | **119.7** | **50.0%** |
-| $B=15$ | DPD (Fixed $\lambda$) | 50.0% | -7.80 | 4.2 | 3.19 | 119.7 | 50.0% |
-| $B=15$ | Length-Penalty Beam | 50.0% | -17.78 | 14.2 | 3.83 | 0.0 | 0.0% |
+| $B=15$ | DPD (No Hull) | 50.0% | -7.80 | 4.2 | 3.31 | 119.7 | 50.0% |
+| $B=15$ | DPD (Fixed $\lambda$) | 50.0% | -7.80 | 4.2 | 3.21 | 119.7 | 50.0% |
 | $B=15$ | Standard Beam Search | 50.0% | -17.78 | 14.2 | 3.82 | 0.0 | 0.0% |
-| $B=15$ | Greedy Search | 50.0% | -18.73 | 14.9 | 0.38 | 0.0 | 0.0% |
-| **$B=20$** | **DPD (Ours)** | **50.0%** | **-7.80** | **4.2** | **3.09** | **132.8** | **50.0%** |
-| $B=20$ | Length-Penalty Beam | 50.0% | -21.43 | 18.0 | 4.10 | 0.0 | 0.0% |
-| $B=20$ | Standard Beam Search | 50.0% | -21.43 | 18.0 | 4.11 | 0.0 | 0.0% |
+| $B=15$ | Length-Penalty Beam | 50.0% | -18.23 | 15.6 | 3.73 | 0.0 | 0.0% |
+| $B=15$ | Greedy Search | 20.0% | -24.11 | 17.2 | 1.02 | 0.0 | 0.0% |
+| **$B=20$** | **DPD (Ours)** | **60.0%** | **-10.23** | **6.2** | **3.09** | **126.2** | **60.0%** |
+| $B=20$ | DPD (No Hull) | 60.0% | -10.23 | 6.2 | 3.11 | 126.2 | 60.0% |
+| $B=20$ | DPD (Fixed $\lambda$) | 60.0% | -10.23 | 6.2 | 3.15 | 126.2 | 60.0% |
+| $B=20$ | Standard Beam Search | 60.0% | -20.19 | 15.7 | 4.11 | 0.0 | 0.0% |
+| $B=20$ | Length-Penalty Beam | 60.0% | -21.25 | 19.6 | 4.11 | 0.0 | 0.0% |
+| $B=20$ | Greedy Search | 40.0% | -26.88 | 20.2 | 1.07 | 0.0 | 0.0% |
 
 ### Non-Convex Synthetic Lattices ($N=15$ instances with exact ground truth)
 

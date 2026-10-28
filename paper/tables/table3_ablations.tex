@@ -7,25 +7,25 @@
 \toprule
 Ablation Dimension & Configuration & Score ($\uparrow$) & Cost & Feasible (\%) ($\uparrow$) & Latency ($\mu$s) & Cert.\% \\
 \midrule
-Beam Width ($K$) & K=2 & -1.89 & 2.27 & 80.0\% & 150.7 & 80.0\% \\
- & K=4 & -1.84 & 2.42 & 80.0\% & 115.3 & 80.0\% \\
- & K=8 & -1.84 & 2.42 & 80.0\% & 121.9 & 80.0\% \\
+Beam Width ($K$) & K=2 & -1.89 & 2.27 & 80.0\% & 220.9 & 20.0\% \\
+ & K=4 & -1.84 & 2.42 & 80.0\% & 123.8 & 40.0\% \\
+ & K=8 & -1.84 & 2.42 & 80.0\% & 201.5 & 73.3\% \\
 \midrule
-Multiplier Rule & Projected Subgradient & -1.84 & 2.42 & 80.0\% & 105.5 & 80.0\% \\
- & Proportional-Integral (PI) & -1.84 & 2.42 & 80.0\% & 158.3 & 80.0\% \\
- & Exponential Moving Average (EMA) & -1.84 & 2.42 & 80.0\% & 122.1 & 80.0\% \\
- & Fixed Multiplier (lambda=0.8) & -1.84 & 2.42 & 80.0\% & 146.8 & 80.0\% \\
+Multiplier Rule & Projected Subgradient & -1.84 & 2.42 & 80.0\% & 167.4 & 40.0\% \\
+ & Proportional-Integral (PI) & -1.84 & 2.42 & 80.0\% & 130.0 & 40.0\% \\
+ & Exponential Moving Average (EMA) & -1.84 & 2.42 & 80.0\% & 120.8 & 40.0\% \\
+ & Fixed Multiplier (lambda=0.8) & -1.84 & 2.42 & 80.0\% & 131.5 & 40.0\% \\
 \midrule
-Pruning Strategy & Hybrid Hull-and-Bound & -1.84 & 2.42 & 80.0\% & 128.3 & 80.0\% \\
- & Exact Bound \& Dominance & -1.84 & 2.42 & 80.0\% & 121.0 & 80.0\% \\
- & Static Hull Only & -1.74 & 2.15 & 73.3\% & 91.4 & 73.3\% \\
- & No Pruning (Standard Beam) & -1.84 & 2.42 & 80.0\% & 100.0 & 80.0\% \\
+Pruning Strategy & Hybrid Hull-and-Bound & -1.84 & 2.42 & 80.0\% & 112.1 & 40.0\% \\
+ & Exact Bound \& Dominance & -1.84 & 2.42 & 80.0\% & 101.3 & 40.0\% \\
+ & Static Hull Only & -1.74 & 2.15 & 73.3\% & 83.9 & 0.0\% \\
+ & No Pruning (Standard Beam) & -1.84 & 2.42 & 80.0\% & 98.7 & 40.0\% \\
 \midrule
-Kernel Implementation & Native Rust Kernel & -1.84 & 2.42 & 80.0\% & 103.9 & 80.0\% \\
- & Pure Python Reference & -1.84 & 2.42 & 80.0\% & 98.7 & 80.0\% \\
+Kernel Implementation & Native Rust Kernel & -1.84 & 2.42 & 80.0\% & 102.9 & 40.0\% \\
+ & Pure Python Reference & -1.84 & 2.42 & 80.0\% & 101.6 & 40.0\% \\
 \midrule
-Completion Bound & Trivial Bound (U=0) & -1.84 & 2.42 & 80.0\% & 104.0 & 80.0\% \\
- & Budget-Aware Bound (alpha=-0.05) & -1.84 & 2.42 & 80.0\% & 115.6 & 80.0\% \\
+Completion Bound & Admissible Zero Bound (U=0) & -1.84 & 2.42 & 80.0\% & 112.4 & 40.0\% \\
+ & Heuristic Budget Bound (alpha=-0.05) & -1.84 & 2.42 & 80.0\% & 106.9 & 0.0\% \\
 \bottomrule
 \end{tabular}
 \end{table*}

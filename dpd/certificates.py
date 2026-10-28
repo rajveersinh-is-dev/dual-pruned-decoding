@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dpd.hull import CostScorePoint, compute_upper_left_hull
-from dpd.types import DualCertificate, PrefixCandidate
+from dpd.types import CertificateScope, DualCertificate, PrefixCandidate
 
 
 def compute_dual_certificate(
@@ -13,24 +13,40 @@ def compute_dual_certificate(
     num_multipliers: int = 100,
     max_multiplier: float = 20.0,
     tolerance: float = 1e-4,
+    scope: CertificateScope = CertificateScope.RESTRICTED_SUBSET,
+    is_global: bool = False,
+    open_frontier_upper_bound: float | None = None,
 ) -> DualCertificate:
     """Computes the Lagrangian dual upper bound and suboptimality certificate.
     
-    Theorem 1: For any lambda >= 0, d(lambda) = lambda * B + max_y (S(y) - lambda * C(y))
-    is an upper bound on S(y*).
-    Taking d* = min_lambda d(lambda) yields the tightest evaluated Lagrangian upper bound.
-    The gap Delta = d* - S(y_inc) >= 0 certifies the maximum suboptimality of the incumbent.
+    Theorem 1: For any lambda >= 0 and any set of candidates Y,
+        d_Y(lambda) = lambda * B + max_{y in Y} (S(y) - lambda * C(y))
+    is an upper bound on max_{y in Y, C(y) <= B} S(y).
+    
+    Critical Scope Distinction:
+        - If is_global is False (default for heuristic beam searches):
+          The upper bound d* holds ONLY over the explored candidate set Y_term.
+          It does NOT bound sequences in unexpanded branches truncated by the beam.
+          In this case, certified_optimal_within_scope may be True, but
+          certified_globally_optimal and certified_optimal are set to False.
+        - If is_global is True (exhaustive tree or branch-and-bound with closed frontier):
+          d* is a genuine upper bound on the global optimal score S(y*).
+          If suboptimality_gap <= tolerance, certified_globally_optimal and
+          certified_optimal are True.
     
     Args:
-        all_terminal_candidates: All complete sequences explored in the search lattice.
+        all_terminal_candidates: Evaluated terminal sequences.
         budget: The resource budget B.
         incumbent: The best feasible solution found, or None if infeasible.
         num_multipliers: Number of multiplier evaluation points.
         max_multiplier: Upper limit for multiplier sweep.
         tolerance: Numerical tolerance for exact optimality (Delta <= tolerance).
+        scope: Explicit scope of the evaluated sequence set.
+        is_global: Whether the candidate set covers all completions in the optimization domain.
+        open_frontier_upper_bound: Optional upper bound on unexplored open frontier branches.
         
     Returns:
-        DualCertificate with bounding gap and full evaluation details.
+        DualCertificate with bounding gap and full scope details.
     """
     if not all_terminal_candidates:
         return DualCertificate(
@@ -40,7 +56,11 @@ def compute_dual_certificate(
             dual_upper_bound=float("inf"),
             suboptimality_gap=float("inf"),
             certified_optimal=False,
-            details={"error": "No terminal candidates evaluated."},
+            certificate_scope=scope,
+            is_global=is_global,
+            certified_globally_optimal=False,
+            certified_optimal_within_scope=False,
+            details={"error": "No terminal candidates evaluated.", "is_global": is_global},
         )
 
     is_feasible = (incumbent is not None) and (incumbent.accumulated_cost <= budget + 1e-9)
@@ -74,6 +94,9 @@ def compute_dual_certificate(
             c.accumulated_score - lam * c.accumulated_cost
             for c in all_terminal_candidates
         )
+        if open_frontier_upper_bound is not None:
+            max_scalarized = max(max_scalarized, open_frontier_upper_bound)
+
         d_val = lam * budget + max_scalarized
         dual_values.append(d_val)
 
@@ -84,10 +107,16 @@ def compute_dual_certificate(
     if is_feasible:
         # Suboptimality gap Delta = d* - S_inc
         suboptimality_gap = max(0.0, best_dual_ub - incumbent_score)
-        certified_optimal = suboptimality_gap <= tolerance
+        certified_optimal_within_scope = suboptimality_gap <= tolerance
+        certified_globally_optimal = is_global and certified_optimal_within_scope
+        certified_optimal = certified_globally_optimal
     else:
         suboptimality_gap = float("inf")
+        certified_optimal_within_scope = False
+        certified_globally_optimal = False
         certified_optimal = False
+
+    effective_scope = CertificateScope.GLOBAL_EXHAUSTIVE if is_global else scope
 
     return DualCertificate(
         is_feasible=is_feasible,
@@ -99,9 +128,22 @@ def compute_dual_certificate(
         dual_values=dual_values,
         best_multiplier=best_lam,
         certified_optimal=certified_optimal,
+        certificate_scope=effective_scope,
+        is_global=is_global,
+        certified_globally_optimal=certified_globally_optimal,
+        certified_optimal_within_scope=certified_optimal_within_scope,
         details={
             "num_candidates_evaluated": len(all_terminal_candidates),
             "best_multiplier": best_lam,
             "min_dual_value": best_dual_ub,
+            "certificate_scope": effective_scope.value,
+            "is_global": is_global,
+            "scope_description": (
+                "Globally valid upper bound over the complete discrete sequence domain."
+                if is_global else
+                "Restricted dual upper bound valid strictly over the evaluated terminal candidate subset."
+            ),
+            "certified_globally_optimal": certified_globally_optimal,
+            "certified_optimal_within_scope": certified_optimal_within_scope,
         },
     )

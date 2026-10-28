@@ -54,8 +54,15 @@ class LMGenerationEnvironment:
                 top_log_probs, top_indices = torch.topk(log_probs, k=self.branch_top_k)
 
             branches: list[tuple[int, float, str | None]] = []
+            top_set = set(top_indices.tolist())
             for lp, idx in zip(top_log_probs.tolist(), top_indices.tolist()):
                 branches.append((int(idx), float(lp), None))
+
+            # Ensure the EOS transition is always accessible with its exact model log-probability,
+            # allowing the decoder to legally terminate within budget constraints.
+            if self.eos_token_id not in top_set:
+                eos_lp = float(log_probs[self.eos_token_id].item())
+                branches.append((self.eos_token_id, eos_lp, None))
 
             return branches
 

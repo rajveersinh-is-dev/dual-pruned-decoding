@@ -54,6 +54,10 @@ $$d^\star = \min_{\lambda \in \Lambda} d(\lambda)$$
 Report the certified suboptimality bound:
 $$\Delta = d^\star - S(y_{\text{inc}}) \ge 0$$
 
+#### Certificate Scopes:
+- **`GLOBAL_EXHAUSTIVE` / `BRANCH_AND_BOUND`:** If beam width was never binding and all pruned branches were safely discarded via admissible bounds ($U(u)$ admissible) or proved infeasible, $\Delta$ certifies global suboptimality over the entire search space. Global optimality (`certified_optimal = True`) is reported if and only if $\Delta \le \epsilon$.
+- **`RESTRICTED_SUBSET`:** If beam width truncated branches or heuristic hull pruning dropped non-hull candidates, the dual bound holds strictly relative to the evaluated subset $\mathcal{Y}_{\text{eval}}$. Global optimality is explicitly refused (`certified_optimal = False`).
+
 ---
 
 ## 3. Complexity Analysis

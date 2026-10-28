@@ -44,6 +44,7 @@ from dpd.multipliers import (
 )
 from dpd.recovery import RecoveryManager
 from dpd.types import (
+    CertificateScope,
     CostScorePoint,
     DecodingResult,
     DecodingTelemetry,
@@ -63,6 +64,7 @@ __all__ = [
     "BudgetConditionedBound",
     "BudgetConstraintValidator",
     "CallableCostModel",
+    "CertificateScope",
     "CharacterCostModel",
     "CostScorePoint",
     "DPDConfig",

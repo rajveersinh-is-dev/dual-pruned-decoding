@@ -76,9 +76,34 @@ class PrefixCandidate:
         )
 
 
+class CertificateScope(str, Enum):
+    """Scope of mathematical validity for a dual certificate."""
+    RESTRICTED_SUBSET = "restricted_subset"  # Valid only over the evaluated terminal candidate set
+    RESTRICTED_LATTICE = "restricted_lattice"  # Valid over a demonstrably complete restricted search lattice
+    GLOBAL_EXHAUSTIVE = "global_exhaustive"  # Valid over the entire combinatorial sequence domain
+    BRANCH_AND_BOUND = "branch_and_bound"  # Valid over entire domain via admissible open frontier bounds
+
+
 @dataclass
 class DualCertificate:
-    """Mathematical certificate of dual upper bounds and suboptimality gap."""
+    """Mathematical certificate of dual upper bounds and suboptimality gap.
+
+    Attributes:
+        is_feasible: Whether the incumbent solution satisfies the hard resource budget.
+        incumbent_score: The objective score S(y_inc) of the best feasible solution.
+        incumbent_cost: The resource cost C(y_inc) of the best feasible solution.
+        dual_upper_bound: The minimized Lagrangian upper bound d* = min_lambda d(lambda).
+        suboptimality_gap: Delta = d* - S(y_inc) >= 0.
+        multipliers_evaluated: Grid and analytical slope breakpoints evaluated.
+        dual_values: Corresponding d(lambda) values for each multiplier.
+        best_multiplier: Multiplier lambda* achieving the minimum dual value.
+        certified_optimal: True if and only if certified optimal over declared scope (Delta <= tol).
+        certificate_scope: Scope over which the certificate is mathematically valid.
+        is_global: True if valid over all completions in the full optimization domain.
+        certified_globally_optimal: True only if is_global and Delta <= tolerance.
+        certified_optimal_within_scope: True if Delta <= tolerance over the evaluated candidate set.
+        details: Comprehensive diagnostic dictionary.
+    """
     is_feasible: bool
     incumbent_score: float
     incumbent_cost: float
@@ -87,7 +112,11 @@ class DualCertificate:
     multipliers_evaluated: list[float] = field(default_factory=list)
     dual_values: list[float] = field(default_factory=list)
     best_multiplier: float = 0.0
-    certified_optimal: bool = False  # True if Delta <= epsilon (within tolerance)
+    certified_optimal: bool = False
+    certificate_scope: CertificateScope = CertificateScope.RESTRICTED_SUBSET
+    is_global: bool = False
+    certified_globally_optimal: bool = False
+    certified_optimal_within_scope: bool = False
     details: dict[str, Any] = field(default_factory=dict)
 
 

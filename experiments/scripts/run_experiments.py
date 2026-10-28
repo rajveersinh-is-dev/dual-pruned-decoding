@@ -377,15 +377,19 @@ def run_ablation_study() -> dict[str, Any]:
     # 5. Admissible Completion Bound Ablation
     bound_results: dict[str, Any] = {}
     for bound_type, b_name in [
-        ("trivial", "Trivial Bound (U=0)"),
-        ("aware", "Budget-Aware Bound (alpha=-0.05)"),
+        ("trivial", "Admissible Zero Bound (U=0)"),
+        ("heuristic", "Heuristic Budget Bound (alpha=-0.05)"),
     ]:
         res_list = []
         for inst in suite:
             cost_model = LatticeCostModel(inst)
             def step_fn(p, pref, inst=inst):
                 return inst.transitions.get(tuple(pref), [(inst.eos_token_id, 0.0, "eos")])
-            b_mgr = BudgetAwareBound(cost_model, max_log_prob_per_step=-0.05) if bound_type == "aware" else TrivialAdmissibleBound()
+            b_mgr = (
+                BudgetAwareBound(cost_model, max_log_prob_per_step=-0.05, allow_heuristic_tighter_bound=True)
+                if bound_type == "heuristic"
+                else TrivialAdmissibleBound()
+            )
             cfg = DPDConfig(
                 beam_width=4,
                 max_steps=inst.max_steps,
@@ -422,7 +426,7 @@ def main():
         try:
             with open(results_file) as f:
                 existing_data = json.load(f)
-        except Exception as e:
+        except (json.JSONDecodeError, OSError) as e:
             print(f"Warning: could not load existing {results_file}: {e}")
 
     rerun_all = "--rerun-all" in sys.argv
